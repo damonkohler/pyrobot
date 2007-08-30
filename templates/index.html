@@ -6,10 +6,20 @@
   </head>
   <body>
     <img src="/static/webcam.png">
+    <script language="javascript">
+    function reloadImage() {
+      var now = new Date();
+      if (document.images) {
+          document.images.myImageName.src = '/static/webcam.png?' + now.getTime();
+      }
+      setTimeout('reloadImage()', 1000);
+    }
+    setTimeout('reloadImage()', 1000);
+    </script>
     <br>
     <a href="/forward">Forward</a> |
-    <a href="/forward">Reverse</a> |
-    <a href="/forward">Left</a> |
-    <a href="/forward">Right</a>
+    <a href="/reverse">Reverse</a> |
+    <a href="/left">Left</a> |
+    <a href="/right">Right</a>
   </body>
 </html>
