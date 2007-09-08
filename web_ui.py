@@ -59,7 +59,7 @@ class Forward(object):
   """Drive forward in a straight line for 1 second."""
 
   def GET(self):
-    roomba.DriveStraight(pyrobot.VELOCITY_QUICK)
+    roomba.DriveStraight(pyrobot.VELOCITY_FAST)
     roomba.Stop(1)
     web.seeother('/')
 
@@ -69,7 +69,7 @@ class Reverse(object):
   """Drive backward in a straight line for 1 second."""
 
   def GET(self):
-    roomba.DriveStraight(-pyrobot.VELOCITY_QUICK)
+    roomba.DriveStraight(-pyrobot.VELOCITY_FAST)
     roomba.Stop(1)
     web.seeother('/')
 
@@ -79,7 +79,7 @@ class Left(object):
   """Turn in place to the left for 0.25 seconds."""
 
   def GET(self):
-    roomba.TurnInPlace(pyrobot.VELOCITY_QUICK, 'ccw')
+    roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'ccw')
     roomba.Stop(0.25)
     web.seeother('/')
 
@@ -89,7 +89,7 @@ class Right(object):
   """Turn in place to the right for 0.25 seconds."""
 
   def GET(self):
-    roomba.TurnInPlace(pyrobot.VELOCITY_QUICK, 'cw')
+    roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'cw')
     roomba.Stop(0.25)
     web.seeother('/')
 

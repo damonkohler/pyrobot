@@ -22,11 +22,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""iRobot Roomba/Create Serial Control Interface (SCI).
+"""iRobot Roomba Serial Control Interface (SCI) and Create Open Interface (OI).
 
 PyRobot was originally based on openinterface.py, developed by iRobot
 Corporation. Many of the docstrings from openinterface.py, particularly those
-which describe the specification, are also used here.
+which describe the specification, are also used here. Also, docstrings may
+contain specification text copied directly from the Roomba SCI Spec Manual and
+the Create Open Interface specification.
+
+Since SCI is a subset of OI, PyRobot first defines the Roomba's functionality
+in the Roomba class and then extends that with the Create's additional
+functionality in the Create class. In addition, since OI is built on SCI the
+SerialCommandInterface class is also used for OI.
 
 """
 __author__ = "damonkohler@gmail.com (Damon Kohler)"
@@ -104,6 +111,28 @@ IR_OPCODES = dict(
     red_green_and_force = 254,
     )
 
+BAUD_RATES = (  # In bits per second.
+    300,
+    600,
+    1200,
+    2400,
+    4800,
+    9600,
+    14400,
+    19200,
+    28800,
+    38400,
+    57600,  # Default.
+    115200)
+
+CHARGING_STATES = (
+    'not-charging',
+    'charging-recovery',
+    'charging',
+    'trickle-charging',
+    'waiting',
+    'charging-error')
+
 # From: http://www.harmony-central.com/MIDI/Doc/table2.html
 MIDI_TABLE = {'rest': 0, 'R': 0, 'pause': 0,
               'G1': 31, 'G#1': 32, 'A1': 33,
@@ -156,10 +185,16 @@ RADIUS_MAX = 2000
 
 VELOCITY_MAX = 500  # mm/s
 VELOCITY_SLOW = VELOCITY_MAX * 0.33
-VELOCITY_QUICK = VELOCITY_MAX * 0.66
-VELOCITY_FAST = VELOCITY_MAX
+VELOCITY_FAST = VELOCITY_MAX * 0.66
 
 WHEEL_SEPARATION = 298  # mm
+
+
+assert struct.calcsize('H') == 2, 'Expecting 2-byte shorts.'
+
+
+class PyRobotError(Exception):
+  pass
 
 
 class SerialCommandInterface(object):
@@ -172,6 +207,12 @@ class SerialCommandInterface(object):
     self.ser = serial.Serial(tty, baudrate=baudrate)
     self.ser.open()
     self.opcodes = {}
+    self.lock = threading.RLock()
+    # TODO(damonkohler): Set up locking for polling and reading sensor data in
+    # a separate thread.
+
+  def __del__(self):
+    self.ser.close()
 
   def Wake(self):
     """Wake up robot."""
@@ -188,6 +229,10 @@ class SerialCommandInterface(object):
     """Send a string of bytes to the robot."""
     self.ser.write(struct.pack('B' * len(bytes), *bytes))
 
+  def Read(self, num_bytes):
+    """Read a string of 'num_bytes' bytes from the robot."""
+    return struct.unpack('B' * num_bytes, self.ser.read(num_bytes))
+
   def __getattr__(self, name):
     """Creates methods for opcodes on the fly.
 
@@ -202,13 +247,175 @@ class SerialCommandInterface(object):
     raise AttributeError
 
 
+class RoombaSensors(object):
+
+  """Retrive and decode the Roomba's sensor data.
+
+  Some of the specification is included in the docstrings. For a complete
+  description, see the Roomba SCI Sepc Manual.
+
+  """
+  def __init__(self, roomba):
+    self.roomba = roomba
+    self.sensors = {}
+
+  def Poll(self):
+    """Keep sensor data up to date by polling for it periodically.
+
+    According to the OI spec, sensor data is updated every 15 ms and should not
+    be polled more often than that. There is no such specification in the SCI
+    spec.
+
+    """
+    pass
+
+  def GetAll(self):
+    """Request and decode all available sensor data."""
+    self.roomba.sensors(0)
+    bytes = self.roomba.Read(26)
+    # NOTE(damonkohler): We decode sensor data in reverse order for better pop
+    # performance.
+    self.DecodeUnsignedShort('capacity', bytes.pop(), bytes.pop())  # mAh
+    self.DecodeUnsignedShort('charge', bytes.pop(), bytes.pop())  # mAh
+    self.DecodeSignedByte('temperature', bytes.pop())  # C
+    self.DecodeSignedShort('current', bytes.pop(), bytes.pop())  # mA
+    self.DecodeUnsignedShort('voltage', bytes.pop(), bytes.pop())  # mV
+    self.DecodeUnsignedByte('charging-state', bytes.pop())
+    self.Angle(bytes.pop(), bytes.pop(), 'degrees')
+    self.DecodeSignedShort('distance', bytes.pop(), bytes.pop())  # mm
+    self.Buttons(bytes.pop())
+    self.DecodeUnsignedByte('remote-opcode', bytes.pop())
+    self.DecodeUnsignedByte('dirt-detector-right', bytes.pop())
+    self.DecodeUnsignedByte('dirt-detector-left', bytes.pop())
+    self.MotorOvercurrents(bytes.pop())
+    self.DecodeBool('virtual-wall', bytes.pop())
+    self.DecodeBool('cliff-right', bytes.pop())
+    self.DecodeBool('cliff-front-right', bytes.pop())
+    self.DecodeBool('cliff-front-left', bytes.pop())
+    self.DecodeBool('cliff-left', bytes.pop())
+    self.DecodeBool('wall', bytes.pop())
+    self.BumpsWheeldrops(bytes.pop())
+
+  def Angle(self, low, high, unit=None):
+    """The angle that Roomba has turned through since the angle was last
+    requested. The angle is expressed as the difference in the distance
+    traveled by Roomba's two wheels in millimeters, specifically the right
+    wheel distance minus the left wheel distance, divided by two. This makes
+    counter-clockwise angles positive and clockwise angles negative. This can
+    be used to directly calculate the angle that Roomba has turned through
+    since the last request. Since the distance between Roomba's wheels is
+    258mm, the equations for calculating the angles in familiar units are:
+
+    Angle in radians = (2 * difference) / 258
+    Angle in degrees = (360 * difference) / (258 * Pi).
+
+    If the value is not polled frequently enough, it will be capped at its
+    minimum or maximum.
+
+    Note: Reported angle and distance may not be accurate. Roomba measures
+    these by detecting its wheel revolutions. If for example, the wheels slip
+    on the floor, the reported angle of distance will be greater than the
+    actual angle or distance.
+
+    """
+    if unit not in (None, 'radians', 'degrees'):
+      raise PyRobotError('Invalid angle unit specified.')
+    self.DecodeSignedShort('angle', low, high)
+    if unit == 'radians':
+      self.sensors['angle'] = (2 * self.sensors['angle']) / 258
+    if unit == 'degrees':
+      self.sensors['angle'] /= math.pi
+
+  def BumpsWheeldrops(self, byte):
+    """The state of the bump (0 = no bump, 1 = bump) and wheeldrop sensors
+    (0 = wheel up, 1 = wheel dropped) are sent as individual bits.
+
+    Note: Some robots do not report the three wheel drops separately. Instead,
+    if any of the three wheels drops, all three wheel-drop bits will be set.
+    You can tell which kind of robot you have by examining the serial number
+    inside the battery compartment. Wheel drops are separate only if there
+    is an 'E' in the serial number.
+
+    """
+    self.sensors.update({
+        'wheel-drop-caster': bool(byte & 0x10),
+        'wheel-drop-left': bool(byte & 0x08),
+        'wheel-drop-right': bool(byte & 0x04),
+        'bump-left': bool(byte & 0x02),
+        'bump-right': bool(byte & 0x01)})
+
+  def MotorOvercurrents(self, byte):
+    """The state of the five motors overcurrent sensors are sent as individual
+    bits (0 = no overcurrent, 1 = overcurrent).
+
+    """
+    self.sensors.update({
+        'drive-left': bool(byte & 0x10),
+        'drive-right': bool(byte & 0x08),
+        'main-brush': bool(byte & 0x04),
+        'vacuum': bool(byte & 0x02),
+        'side-brush': bool(byte & 0x01)})
+
+  def Buttons(self, byte):
+    """The state of the four Roomba buttons are sent as individual bits
+    (0 = button not pressed, 1 = button pressed).
+
+    """
+    self.sensors.update({
+        'power': bool(byte & 0x08),
+        'spot': bool(byte & 0x04),
+        'clean': bool(byte & 0x02),
+        'max': bool(byte & 0x01)})
+
+  def DecodeBool(self, name, byte):
+    """Decode 'byte' as a bool and map it to 'name'."""
+    self.sensors[name] = bool(byte)
+
+  # NOTE(damonkohler): We specify the low byte first to make it easier when
+  # popping bytes off a list.
+  def DecodeUnsignedShort(self, name, low, high):
+    """Map an unsigned short from a 'high' and 'low' bytes to 'name'."""
+    self.sensors[name] = struct.unpack('>H', high + low)[0]
+
+  def DecodeShort(self, name, low, high):
+    """Map a short from a 'high' and 'low' bytes to 'name'."""
+    self.sensors[name] = struct.unpack('>h', high + low)[0]
+
+  def DecodeSignedByte(self, name, byte):
+    """Map signed 'byte' to 'name'."""
+    self.sensors[name] = struct.unpack('b', byte)[0]
+
+  def DecodeUnsignedByte(self, name, byte):
+    """Map unsigned 'byte' to 'name'."""
+    self.sensors[name] = struct.unpack('B', byte)[0]
+
+
 class Roomba(object):
 
   """Represents a Roomba robot."""
 
   def __init__(self, tty='/dev/ttyUSB0'):
+    self.tty = tty
     self.sci = SerialCommandInterface(tty, 57600)
     self.sci.AddOpcodes(ROOMBA_OPCODES)
+
+  def ChangeBaudRate(self, baud_rate):
+    """Sets the baud rate in bits per second (bps) at which SCI commands and
+    data are sent according to the baud code sent in the data byte.
+
+    The default baud rate at power up is 57600 bps. (See Serial Port Settings,
+    above.) Once the baud rate is changed, it will persist until Roomba is
+    power cycled by removing the battery (or until the battery voltage falls
+    below the minimum required for processor operation). You must wait 100ms
+    after sending this command before sending additional commands at the new
+    baud rate. The SCI must be in passive, safe, or full mode to accept this
+    command. This command puts the SCI in passive mode.
+
+    """
+    if baud_rate not in BAUD_RATES:
+      raise PyRobotError('Invalid baud rate specified.')
+    self.sci.baud(baud_rate)
+    self.sci = SerialCommandInterface(self.tty, baud_rate)
 
   def Control(self):
     """Start the robot's SCI interface and place it in safe mode."""
@@ -238,7 +445,6 @@ class Roomba(object):
     Also see DriveStraight and TurnInPlace convenience methods.
 
     """
-    assert struct.calcsize('H') == 2, 'Expecting 2-byte shorts. Doh!'
     # Mask integers to 2 bytes.
     velocity = int(velocity) & 0xffff
     radius = int(radius) & 0xffff
@@ -248,13 +454,8 @@ class Roomba(object):
     bytes = struct.unpack('4B', struct.pack('>2H', velocity, radius))
     self.sci.drive(*bytes)
 
-  def Stop(self, duration=None):
-    """Set velocity and radius to 0 to stop the robot after optionally
-    delaying for 'duration' seconds.
-
-    """
-    if duration is not None:
-      time.sleep(duration)
+  def Stop(self):
+    """Set velocity and radius to 0 to stop movement."""
     self.Drive(0, 0)
 
   def DriveStraight(self, velocity):
@@ -268,15 +469,29 @@ class Roomba(object):
     self.Drive(velocity, valid_directions[direction])
 
 
+class CreateSensors(RoombaSensors):
+
+  """Handles retrieving and decoding the Create's sensor data."""
+
+  pass
+
+
+class Create(Roomba):
+
+  """Represents a Create robot."""
+
+  pass
+
+
 if __name__ == '__main__':
   """Do a little dance."""
   r = Roomba()
   r.sci.Wake()
   r.Control()
   time.sleep(0.25)
-  r.TurnInPlace(VELOCITY_QUICK, 'cw')
+  r.TurnInPlace(VELOCITY_FAST, 'cw')
   time.sleep(0.25)
-  r.TurnInPlace(VELOCITY_QUICK, 'ccw')
+  r.TurnInPlace(VELOCITY_FAST, 'ccw')
   time.sleep(0.25)
   r.DriveStraight(VELOCITY_FAST)
   r.Stop(0.25)

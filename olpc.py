@@ -41,7 +41,7 @@ GST_PIPE = ['v4l2src', 'ffmpegcolorspace', 'pngenc']
 class Camera(object):
 
   """A class representing the OLPC camera."""
-  
+
   def __init__(self, snap_path):
     self.snap_path = snap_path
     temp_file, self._temp_path = tempfile.mkstemp()
