@@ -5,16 +5,17 @@
     <title>PyRobot Web UI</title>
   </head>
   <body>
-    <img src="/static/webcam.png">
+    <img name="webcam" id="webcam" src="/static/webcam.png">
     <script language="javascript">
+    timeout = 2500;
     function reloadImage() {
       var now = new Date();
       if (document.images) {
-          document.images.myImageName.src = '/static/webcam.png?' + now.getTime();
+          document.images.webcam.src = '/static/webcam.png?' + now.getTime();
       }
-      setTimeout('reloadImage()', 1000);
+      setTimeout('reloadImage()', timeout);
     }
-    setTimeout('reloadImage()', 1000);
+    setTimeout('reloadImage()', timeout);
     </script>
     <br>
     <a href="/forward">Forward</a> |

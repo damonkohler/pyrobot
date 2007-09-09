@@ -41,6 +41,7 @@ __author__ = "damonkohler@gmail.com (Damon Kohler)"
 import serial
 import struct
 import time
+import threading
 
 ROOMBA_OPCODES = dict(
     start = 128,
@@ -58,7 +59,7 @@ ROOMBA_OPCODES = dict(
     song = 140,
     play_song = 141,
     sensors = 142,
-    cover_and_seek_dock = 143,
+    force_seeking_dock = 143,
     )
 
 CREATE_OPCODES = dict(
@@ -80,6 +81,7 @@ CREATE_OPCODES = dict(
     )
 
 IR_OPCODES = dict(
+    # Remote control.
     left = 129,
     forward = 130,
     right = 131,
@@ -89,24 +91,20 @@ IR_OPCODES = dict(
     medium = 135,
     large = 136,
     clean = 136,
-    #stop = 137, Duplicate.
+    pause = 137,
     power = 138,
     arc_left = 139,
     arc_right = 140,
-    #stop = 141, Duplicate.
-    download = 142,
+    drive_stop = 141,
+    # Scheduling remote.
+    send_all = 142,
     seek_dock = 143,
-    # 144-240?
+    # Home base.
     reserved = 240,
-    # 241?
     force_field = 242,
-    # 243?
     green_buoy = 244,
-    # 245?
-    red_buoy_and_force = 246,
-    # 247?
     red_buoy = 248,
-    # 249-251?
+    red_buoy_and_force = 250,
     red_and_green_buoy = 252,
     red_green_and_force = 254,
     )
@@ -494,4 +492,5 @@ if __name__ == '__main__':
   r.TurnInPlace(VELOCITY_FAST, 'ccw')
   time.sleep(0.25)
   r.DriveStraight(VELOCITY_FAST)
-  r.Stop(0.25)
+  time.sleep(0.25)
+  r.Stop()

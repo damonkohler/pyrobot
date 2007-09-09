@@ -33,6 +33,8 @@ import olpc
 import os
 import pyrobot
 import web
+import sys
+import time
 
 urls = (
     '/', 'Index',
@@ -41,6 +43,7 @@ urls = (
     '/left', 'Left',
     '/right', 'Right',
     '/webcam', 'Webcam',
+    '/kill', 'Kill',
     )
 
 render = web.template.render('templates/')
@@ -54,13 +57,22 @@ class Index(object):
     print render.index()
 
 
+class Kill(object):
+
+  """Kill the web server."""
+
+  def GET(self):
+    sys.exit(0)
+
+
 class Forward(object):
 
   """Drive forward in a straight line for 1 second."""
 
   def GET(self):
     roomba.DriveStraight(pyrobot.VELOCITY_FAST)
-    roomba.Stop(1)
+    time.sleep(1)
+    roomba.Stop()
     web.seeother('/')
 
 
@@ -70,7 +82,8 @@ class Reverse(object):
 
   def GET(self):
     roomba.DriveStraight(-pyrobot.VELOCITY_FAST)
-    roomba.Stop(1)
+    time.sleep(1)
+    roomba.Stop()
     web.seeother('/')
 
 
@@ -80,7 +93,8 @@ class Left(object):
 
   def GET(self):
     roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'ccw')
-    roomba.Stop(0.25)
+    time.sleep(0.25)
+    roomba.Stop()
     web.seeother('/')
 
 
@@ -90,7 +104,8 @@ class Right(object):
 
   def GET(self):
     roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'cw')
-    roomba.Stop(0.25)
+    time.sleep(0.25)
+    roomba.Stop()
     web.seeother('/')
 
 
@@ -103,4 +118,5 @@ if __name__ == '__main__':
   camera = olpc.Camera('static/webcam.png')
   camera.StartWebcam()
 
-  web.run(urls, globals())
+  web.webapi.internalerror = web.debugerror
+  web.run(urls, globals(), web.reloader)
