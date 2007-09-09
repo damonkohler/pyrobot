@@ -42,6 +42,7 @@ import serial
 import struct
 import time
 import threading
+import math
 
 ROOMBA_OPCODES = dict(
     start = 128,
@@ -51,13 +52,13 @@ ROOMBA_OPCODES = dict(
     full = 132,
     power = 133,
     spot = 134,
-    cover = 135,
-    demo = 136,
+    clean = 135,
+    max = 136,
     drive = 137,
     motors = 138,
     leds = 139,
     song = 140,
-    play_song = 141,
+    play = 141,
     sensors = 142,
     force_seeking_dock = 143,
     )
@@ -65,7 +66,6 @@ ROOMBA_OPCODES = dict(
 CREATE_OPCODES = dict(
     pwm_low_side_drivers = 144,
     direct_drive = 145,
-    # 146?
     digital_outputs = 147,
     stream = 148,
     query_list = 149,
@@ -229,7 +229,8 @@ class SerialCommandInterface(object):
 
   def Read(self, num_bytes):
     """Read a string of 'num_bytes' bytes from the robot."""
-    return struct.unpack('B' * num_bytes, self.ser.read(num_bytes))
+    #return struct.unpack('B' * num_bytes, self.ser.read(num_bytes))
+    return self.ser.read(num_bytes)
 
   def __getattr__(self, name):
     """Creates methods for opcodes on the fly.
@@ -269,18 +270,19 @@ class RoombaSensors(object):
 
   def GetAll(self):
     """Request and decode all available sensor data."""
-    self.roomba.sensors(0)
-    bytes = self.roomba.Read(26)
+    self.roomba.sci.sensors(0)
+    bytes = self.roomba.sci.Read(26)
+    bytes = list(bytes)
     # NOTE(damonkohler): We decode sensor data in reverse order for better pop
     # performance.
     self.DecodeUnsignedShort('capacity', bytes.pop(), bytes.pop())  # mAh
     self.DecodeUnsignedShort('charge', bytes.pop(), bytes.pop())  # mAh
-    self.DecodeSignedByte('temperature', bytes.pop())  # C
-    self.DecodeSignedShort('current', bytes.pop(), bytes.pop())  # mA
+    self.DecodeByte('temperature', bytes.pop())  # C
+    self.DecodeShort('current', bytes.pop(), bytes.pop())  # mA
     self.DecodeUnsignedShort('voltage', bytes.pop(), bytes.pop())  # mV
     self.DecodeUnsignedByte('charging-state', bytes.pop())
     self.Angle(bytes.pop(), bytes.pop(), 'degrees')
-    self.DecodeSignedShort('distance', bytes.pop(), bytes.pop())  # mm
+    self.DecodeShort('distance', bytes.pop(), bytes.pop())  # mm
     self.Buttons(bytes.pop())
     self.DecodeUnsignedByte('remote-opcode', bytes.pop())
     self.DecodeUnsignedByte('dirt-detector-right', bytes.pop())
@@ -318,7 +320,7 @@ class RoombaSensors(object):
     """
     if unit not in (None, 'radians', 'degrees'):
       raise PyRobotError('Invalid angle unit specified.')
-    self.DecodeSignedShort('angle', low, high)
+    self.DecodeShort('angle', low, high)
     if unit == 'radians':
       self.sensors['angle'] = (2 * self.sensors['angle']) / 258
     if unit == 'degrees':
@@ -335,6 +337,7 @@ class RoombaSensors(object):
     is an 'E' in the serial number.
 
     """
+    byte = struct.unpack('B', byte)[0]
     self.sensors.update({
         'wheel-drop-caster': bool(byte & 0x10),
         'wheel-drop-left': bool(byte & 0x08),
@@ -347,6 +350,7 @@ class RoombaSensors(object):
     bits (0 = no overcurrent, 1 = overcurrent).
 
     """
+    byte = struct.unpack('B', byte)[0]
     self.sensors.update({
         'drive-left': bool(byte & 0x10),
         'drive-right': bool(byte & 0x08),
@@ -359,6 +363,7 @@ class RoombaSensors(object):
     (0 = button not pressed, 1 = button pressed).
 
     """
+    byte = struct.unpack('B', byte)[0]
     self.sensors.update({
         'power': bool(byte & 0x08),
         'spot': bool(byte & 0x04),
@@ -379,7 +384,7 @@ class RoombaSensors(object):
     """Map a short from a 'high' and 'low' bytes to 'name'."""
     self.sensors[name] = struct.unpack('>h', high + low)[0]
 
-  def DecodeSignedByte(self, name, byte):
+  def DecodeByte(self, name, byte):
     """Map signed 'byte' to 'name'."""
     self.sensors[name] = struct.unpack('b', byte)[0]
 

@@ -3,11 +3,12 @@
 <html>
   <head>
     <title>PyRobot Web UI</title>
+    <script type="text/javascript" src="/static/MochiKit/MochiKit.js"></script>
   </head>
   <body>
     <img name="webcam" id="webcam" src="/static/webcam.png">
     <script language="javascript">
-    timeout = 2500;
+    var timeout = 2500;
     function reloadImage() {
       var now = new Date();
       if (document.images) {
@@ -21,6 +22,24 @@
     <a href="/forward">Forward</a> |
     <a href="/reverse">Reverse</a> |
     <a href="/left">Left</a> |
-    <a href="/right">Right</a>
+    <a href="/right">Right</a> |
+    <a href="/dock">Dock</a>
+    <br><br>
+    <div id='charge'></div>
+    <div id='charging-state'></div>
+    <div id='temperature'></div>
+    <script language="javascript">
+    function updateSensorData() {
+      var url = '/sensors';
+      var d = loadJSONDoc(url);
+      d.addCallback(function(r) {
+        getElement('charge').innerHTML = 'Charge: ' + r.charge + '/' + r.capacity;
+        getElement('charging-state').innerHTML = 'Charging state: ' + r['charging-state'];
+        getElement('temperature').innerHTML = 'Temperature: ' + r.temperature;
+        setTimeout('updateSensorData()', 2500);
+      });
+    }
+    updateSensorData();
+    </script>
   </body>
 </html>

@@ -35,6 +35,7 @@ import pyrobot
 import web
 import sys
 import time
+import simplejson
 
 urls = (
     '/', 'Index',
@@ -42,11 +43,22 @@ urls = (
     '/reverse', 'Reverse',
     '/left', 'Left',
     '/right', 'Right',
+    '/dock', 'Dock',
     '/webcam', 'Webcam',
+    '/sensors', 'Sensors',
     '/kill', 'Kill',
     )
 
 render = web.template.render('templates/')
+
+roomba = pyrobot.Roomba()
+sensors = pyrobot.RoombaSensors(roomba)
+roomba.Control()
+
+if not os.path.exists('static'):
+  os.mkdir('static')
+camera = olpc.Camera('static/webcam.png')
+camera.StartWebcam()
 
 
 class Index(object):
@@ -109,14 +121,27 @@ class Right(object):
     web.seeother('/')
 
 
+class Dock(object):
+
+  """Start docking procedures."""
+
+  def GET(self):
+    roomba.sci.force_seeking_dock()
+    roomba.sci.clean()
+    web.seeother('/')
+
+class Sensors(object):
+
+  """Return a JSON object with various sensor data."""
+
+  def GET(self):
+    sensors.GetAll()
+    sensors.sensors['charging-state'] = \
+      pyrobot.CHARGING_STATES[sensors.sensors['charging-state']]
+    print simplejson.dumps(sensors.sensors)
+ 
+
+web.webapi.internalerror = web.debugerror
+
 if __name__ == '__main__':
-  roomba = pyrobot.Roomba()
-  roomba.Control()
-
-  if not os.path.exists('static'):
-    os.mkdir('static')
-  camera = olpc.Camera('static/webcam.png')
-  camera.StartWebcam()
-
-  web.webapi.internalerror = web.debugerror
   web.run(urls, globals(), web.reloader)
