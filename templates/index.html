@@ -3,43 +3,75 @@
 <html>
   <head>
     <title>PyRobot Web UI</title>
+    <style type="text/css">
+      table.sensors { font-size: small; border: 0px; width: 30em; }
+      table.sensors th { border: 0px; border-bottom: 1px solid #aaaaaa; }
+      table.sensors td { border: 0px; }
+      table.sensors th, table.sensors td { padding: 3px; }
+    </style>
     <script type="text/javascript" src="/static/MochiKit/MochiKit.js"></script>
+    <script type="text/javascript">
+      buildTableFromObj = function(obj) {
+        var rows = [];
+        for (attr in obj) {
+          rows.push([attr, obj[attr]]);
+        }
+        row_display = function (row) {
+          return TR(null, map(partial(TD, null), row));
+        }
+        var newTable = TABLE({'id': 'sensors', 'class': 'sensors'},
+          TH(null, 'Sensor'),
+          TH(null, 'Value'),
+          TBODY(null, map(row_display, rows)));
+        return newTable
+      }
+
+      updateSensorData = function() {
+        var url = '/static/sensors';
+        var d = MochiKit.Async.loadJSONDoc(url);
+        d.addCallback(function(r) {
+          new_sensor_table = buildTableFromObj(r);
+          sensor_table = getElement('sensors');
+          if (!sensor_table) {
+            doc = currentDocument();
+            MochiKit.DOM.appendChildNodes(doc.body, new_sensor_table);
+          } else {
+            swapDom(sensor_table, new_sensor_table);
+          }
+        });
+        MochiKit.Async.callLater(5, updateSensorData);
+      }
+      
+      MochiKit.Signal.connect(window, 'onload', updateSensorData);
+
+      updateWebcam = function() {
+        var now = new Date();
+        webcam_img = getElement('webcam');
+        webcam_img.src = '/static/webcam.png?' + now.getTime();
+        MochiKit.Async.callLater(5, updateWebcam);
+      }
+
+      MochiKit.Signal.connect(window, 'onload', updateWebcam);
+    </script>
   </head>
   <body>
-    <img name="webcam" id="webcam" src="/static/webcam.png">
-    <script language="javascript">
-    var timeout = 2500;
-    function reloadImage() {
-      var now = new Date();
-      if (document.images) {
-          document.images.webcam.src = '/static/webcam.png?' + now.getTime();
-      }
-      setTimeout('reloadImage()', timeout);
-    }
-    setTimeout('reloadImage()', timeout);
-    </script>
+    <img id="webcam" src="/static/webcam.png">
     <br>
-    <a href="/forward">Forward</a> |
-    <a href="/reverse">Reverse</a> |
-    <a href="/left">Left</a> |
-    <a href="/right">Right</a> |
-    <a href="/dock">Dock</a>
+    <a href="#"
+      onclick="javascript:MochiKit.Async.loadJSONDoc('/forward');
+        return false;">Forward</a> |
+    <a href="#"
+       onclick="javascript:MochiKit.Async.loadJSONDoc('/reverse');
+         return false;">Reverse</a> |
+    <a href="#"
+       onclick="javascript:MochiKit.Async.loadJSONDoc('/left');
+         return false;">Left</a> |
+    <a href="#"
+       onclick="javascript:MochiKit.Async.loadJSONDoc('/right');
+         return false;">Right</a> |
+    <a href="#"
+       onclick="javascript:MochiKit.Async.loadJSONDoc('/dock');
+         return false;">Dock</a>
     <br><br>
-    <div id='charge'></div>
-    <div id='charging-state'></div>
-    <div id='temperature'></div>
-    <script language="javascript">
-    function updateSensorData() {
-      var url = '/sensors';
-      var d = loadJSONDoc(url);
-      d.addCallback(function(r) {
-        getElement('charge').innerHTML = 'Charge: ' + r.charge + '/' + r.capacity;
-        getElement('charging-state').innerHTML = 'Charging state: ' + r['charging-state'];
-        getElement('temperature').innerHTML = 'Temperature: ' + r.temperature;
-        setTimeout('updateSensorData()', 2500);
-      });
-    }
-    updateSensorData();
-    </script>
   </body>
 </html>
