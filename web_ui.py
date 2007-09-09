@@ -37,111 +37,96 @@ import sys
 import time
 import simplejson
 
-urls = (
-    '/', 'Index',
-    '/forward', 'Forward',
-    '/reverse', 'Reverse',
-    '/left', 'Left',
-    '/right', 'Right',
-    '/dock', 'Dock',
-    '/webcam', 'Webcam',
-    '/sensors', 'Sensors',
-    '/kill', 'Kill',
-    )
-
 render = web.template.render('templates/')
 
-roomba = pyrobot.Roomba()
-sensors = pyrobot.RoombaSensors(roomba)
-roomba.Control()
 
-if not os.path.exists('static'):
-  os.mkdir('static')
-camera = olpc.Camera('static/webcam.png')
-camera.StartWebcam()
+class RoombaWebController(object):
 
+  """Control and monitor the Roomba through a web interface."""
 
-class Index(object):
+  def __init__(self):
+    self.roomba = None
+    self.sensors = None
 
-  """Display the interface."""
+  # TODO(damonkohler): This is dumb.
+  def __call__(self):
+    """Pretend to construct ourselves by returning self when called.
 
-  def GET(self):
+    web.py expects callables in the URL mapping (why?), but we want to keep
+    just one instance of this class.
+
+    """
+    return self
+
+  def StartWebcam(self):
+    """Start up the OLPC webcam feed."""
+    if not os.path.exists('static'):
+      os.mkdir('static')
+    camera = olpc.Camera('static/webcam.png')
+    camera.StartWebcam()
+
+  def ResetRoomba(self):
+    """Create a new Roomba and RoombaSensors, wake it, and control it."""
+    self.roomba = pyrobot.Roomba()
+    self.sensors = pyrobot.RoombaSensors(self.roomba)
+    self.roomba.Wake()
+    self.roomba.Control()
+
+  GET = web.autodelegate('GET_')
+
+  def GET_(self):
+    """Display the UI."""
     print render.index()
 
-
-class Kill(object):
-
-  """Kill the web server."""
-
-  def GET(self):
+  def GET_kill(self):
+    """Kill the web server."""
     sys.exit(0)
 
-
-class Forward(object):
-
-  """Drive forward in a straight line for 1 second."""
-
-  def GET(self):
-    roomba.DriveStraight(pyrobot.VELOCITY_FAST)
+  def GET_forward(self):
+    """Drive forward in a straight line for 1 second."""
+    self.roomba.DriveStraight(pyrobot.VELOCITY_FAST)
     time.sleep(1)
-    roomba.Stop()
-    web.seeother('/')
+    self.roomba.Stop()
 
-
-class Reverse(object):
-
-  """Drive backward in a straight line for 1 second."""
-
-  def GET(self):
-    roomba.DriveStraight(-pyrobot.VELOCITY_FAST)
+  def GET_reverse(self):
+    """Drive backward in a straight line for 1 second."""
+    self.roomba.DriveStraight(-pyrobot.VELOCITY_FAST)
     time.sleep(1)
-    roomba.Stop()
-    web.seeother('/')
+    self.roomba.Stop()
 
-
-class Left(object):
-
-  """Turn in place to the left for 0.25 seconds."""
-
-  def GET(self):
-    roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'ccw')
+  def GET_left(self):
+    """Turn in place to the left for 0.25 seconds."""
+    self.roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'ccw')
     time.sleep(0.25)
-    roomba.Stop()
-    web.seeother('/')
+    self.roomba.Stop()
 
-
-class Right(object):
-
-  """Turn in place to the right for 0.25 seconds."""
-
-  def GET(self):
-    roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'cw')
+  def GET_right(self):
+    """Turn in place to the right for 0.25 seconds."""
+    self.roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'cw')
     time.sleep(0.25)
-    roomba.Stop()
-    web.seeother('/')
+    self.roomba.Stop()
 
+  def GET_dock(self):
+    """Start docking procedures."""
+    self.roomba.sci.force_seeking_dock()
+    self.roomba.sci.clean()
 
-class Dock(object):
-
-  """Start docking procedures."""
-
-  def GET(self):
-    roomba.sci.force_seeking_dock()
-    roomba.sci.clean()
-    web.seeother('/')
-
-class Sensors(object):
-
-  """Return a JSON object with various sensor data."""
-
-  def GET(self):
+  def GET_sensors(self):
+    """Return a JSON object with various sensor data."""
     sensors.GetAll()
     sensors.sensors['charging-state'] = \
       pyrobot.CHARGING_STATES[sensors.sensors['charging-state']]
     print simplejson.dumps(sensors.sensors)
  
 
-web.webapi.internalerror = web.debugerror
+def main():
+  controller = RoombaWebController()
+  controller.ResetRoomba()
+  controller.StartWebcam()
+  web.webapi.internalerror = web.debugerror
+  urls = ('/(.*)', 'controller')
+  web.run(urls, locals())
+
 
 if __name__ == '__main__':
-  web.run(urls, globals(), web.reloader)
+  main()

@@ -27,7 +27,7 @@
       }
 
       updateSensorData = function() {
-        var url = '/static/sensors';
+        var url = '/sensors';
         var d = MochiKit.Async.loadJSONDoc(url);
         d.addCallback(function(r) {
           new_sensor_table = buildTableFromObj(r);
