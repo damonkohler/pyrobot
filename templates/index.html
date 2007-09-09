@@ -48,7 +48,7 @@
         var now = new Date();
         webcam_img = getElement('webcam');
         webcam_img.src = '/static/webcam.png?' + now.getTime();
-        MochiKit.Async.callLater(5, updateWebcam);
+        MochiKit.Async.callLater(2, updateWebcam);
       }
 
       MochiKit.Signal.connect(window, 'onload', updateWebcam);
@@ -57,6 +57,7 @@
   <body>
     <img id="webcam" src="/static/webcam.png">
     <br>
+    <a href="/static/sound.ogg">Listen</a> |
     <a href="#"
       onclick="javascript:MochiKit.Async.loadJSONDoc('/forward');
         return false;">Forward</a> |
@@ -71,7 +72,10 @@
          return false;">Right</a> |
     <a href="#"
        onclick="javascript:MochiKit.Async.loadJSONDoc('/dock');
-         return false;">Dock</a>
+         return false;">Dock</a> |
+    <a href="#"
+       onclick="javascript:MochiKit.Async.loadJSONDoc('/reset');
+         return false;">Reset</a>
     <br><br>
   </body>
 </html>

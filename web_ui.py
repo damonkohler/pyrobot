@@ -65,11 +65,18 @@ class RoombaWebController(object):
     camera = olpc.Camera('static/webcam.png')
     camera.StartWebcam()
 
+  def StartMicrophone(self):
+    """Start up the OLPC microphone feed."""
+    if not os.path.exists('static'):
+      os.mkdir('static')
+    microphone = olpc.Microphone('static/sound.ogg')
+    microphone.StartMicrophone()
+
   def ResetRoomba(self):
     """Create a new Roomba and RoombaSensors, wake it, and control it."""
     self.roomba = pyrobot.Roomba()
     self.sensors = pyrobot.RoombaSensors(self.roomba)
-    self.roomba.Wake()
+    self.roomba.sci.Wake()
     self.roomba.Control()
 
   GET = web.autodelegate('GET_')
@@ -86,24 +93,24 @@ class RoombaWebController(object):
     """Drive forward in a straight line for 1 second."""
     self.roomba.DriveStraight(pyrobot.VELOCITY_FAST)
     time.sleep(1)
-    self.roomba.Stop()
+    self.roomba.SlowStop(pyrobot.VELOCITY_FAST)
 
   def GET_reverse(self):
     """Drive backward in a straight line for 1 second."""
     self.roomba.DriveStraight(-pyrobot.VELOCITY_FAST)
     time.sleep(1)
-    self.roomba.Stop()
+    self.roomba.SlowStop(-pyrobot.VELOCITY_FAST)
 
   def GET_left(self):
     """Turn in place to the left for 0.25 seconds."""
-    self.roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'ccw')
-    time.sleep(0.25)
+    self.roomba.TurnInPlace(pyrobot.VELOCITY_SLOW, 'ccw')
+    time.sleep(1)
     self.roomba.Stop()
 
   def GET_right(self):
     """Turn in place to the right for 0.25 seconds."""
-    self.roomba.TurnInPlace(pyrobot.VELOCITY_FAST, 'cw')
-    time.sleep(0.25)
+    self.roomba.TurnInPlace(pyrobot.VELOCITY_SLOW, 'cw')
+    time.sleep(1)
     self.roomba.Stop()
 
   def GET_dock(self):
@@ -113,16 +120,21 @@ class RoombaWebController(object):
 
   def GET_sensors(self):
     """Return a JSON object with various sensor data."""
-    sensors.GetAll()
-    sensors.sensors['charging-state'] = \
-      pyrobot.CHARGING_STATES[sensors.sensors['charging-state']]
-    print simplejson.dumps(sensors.sensors)
+    self.sensors.GetAll()
+    self.sensors.sensors['charging-state'] = \
+      pyrobot.CHARGING_STATES[self.sensors.sensors['charging-state']]
+    print simplejson.dumps(self.sensors.sensors)
+
+  def GET_reset(self):
+    """Reset the Roomba."""
+    self.ResetRoomba()
  
 
 def main():
   controller = RoombaWebController()
   controller.ResetRoomba()
   controller.StartWebcam()
+  controller.StartMicrophone()
   web.webapi.internalerror = web.debugerror
   urls = ('/(.*)', 'controller')
   web.run(urls, locals())

@@ -461,6 +461,16 @@ class Roomba(object):
     """Set velocity and radius to 0 to stop movement."""
     self.Drive(0, 0)
 
+  def SlowStop(self, velocity):
+    """Slowly reduce the velocity to 0 to stop movement."""
+    velocities = xrange(velocity, VELOCITY_SLOW, -25)
+    if velocity < 0:
+      velocities = xrange(velocity, -VELOCITY_SLOW, 25)
+    for v in velocities:
+      self.Drive(v, RADIUS_STRAIGHT)
+      time.sleep(0.25)
+    self.Stop()
+
   def DriveStraight(self, velocity):
     """Drive in a straight line."""
     self.Drive(velocity, RADIUS_STRAIGHT)
