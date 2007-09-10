@@ -102,15 +102,15 @@ class RoombaWebController(object):
     self.roomba.SlowStop(-pyrobot.VELOCITY_FAST)
 
   def GET_left(self):
-    """Turn in place to the left for 0.25 seconds."""
+    """Turn in place to the left."""
     self.roomba.TurnInPlace(pyrobot.VELOCITY_SLOW, 'ccw')
-    time.sleep(1)
+    time.sleep(0.5)
     self.roomba.Stop()
 
   def GET_right(self):
-    """Turn in place to the right for 0.25 seconds."""
+    """Turn in place to the right."""
     self.roomba.TurnInPlace(pyrobot.VELOCITY_SLOW, 'cw')
-    time.sleep(1)
+    time.sleep(0.5)
     self.roomba.Stop()
 
   def GET_dock(self):
