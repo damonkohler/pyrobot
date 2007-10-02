@@ -29,18 +29,16 @@ This web interface is designed for use with an OLPC controlled Roomba.
 """
 __author__ = "damonkohler@gmail.com (Damon Kohler)"
 
-import olpc
 import os
-import pyrobot
-import web
 import sys
 import time
 import simplejson
+import BaseHTTPServer
 
-render = web.template.render('templates/')
+import pyrobot
 
 
-class RoombaWebController(object):
+class RoombaWebController(BaseHTTPServer.BaseHTTPRequestHandler):
 
   """Control and monitor the Roomba through a web interface."""
 
@@ -48,46 +46,53 @@ class RoombaWebController(object):
     self.roomba = None
     self.sensors = None
 
-  # TODO(damonkohler): This is dumb.
-  def __call__(self):
-    """Pretend to construct ourselves by returning self when called.
-
-    web.py expects callables in the URL mapping (why?), but we want to keep
-    just one instance of this class.
-
-    """
+  def __call__(self, *args, **kwargs):
+    """We want a single controller across all threads."""
+    # BaseHTTPRequestHandler is old-style. No super for us! :(
+    BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, *args, **kwargs)
     return self
-
-  def StartWebcam(self):
-    """Start up the OLPC webcam feed."""
-    if not os.path.exists('static'):
-      os.mkdir('static')
-    camera = olpc.Camera('static/webcam.png')
-    camera.StartWebcam()
-
-  def StartMicrophone(self):
-    """Start up the OLPC microphone feed."""
-    if not os.path.exists('static'):
-      os.mkdir('static')
-    microphone = olpc.Microphone('static/sound.ogg')
-    microphone.StartMicrophone()
 
   def ResetRoomba(self):
     """Create a new Roomba and RoombaSensors, wake it, and control it."""
     self.roomba = pyrobot.Roomba()
     self.sensors = pyrobot.RoombaSensors(self.roomba)
     self.roomba.sci.Wake()
-    self.roomba.Control()
+    self.roomba.Control(safe=False)
 
-  GET = web.autodelegate('GET_')
+  def _SendHeaders(self):
+    """Send response headers."""
+    self.send_response(200)
+    self.send_header("Content-type", "text/html")
+    self.end_headers()
 
-  def GET_(self):
-    """Display the UI."""
-    print render.index()
+  def _RenderTemplate(self, template):
+    """Render a template to the output stream."""
+    template_file = open(os.path.join('templates', template))
+    self.wfile.write(template_file.read())
 
-  def GET_kill(self):
-    """Kill the web server."""
-    sys.exit(0)
+  def _WriteStaticFile(self, static):
+    """Write a static file to the output stream."""
+    static_file = open(os.path.join('static', static))
+    self.wfile.write(static_file.read())
+
+  def do_HEAD(self):
+    """Send headers on HEAD request."""
+    self._SendHeaders()
+
+  def do_GET(self):
+    """Render index template or delegate to another GET handler."""
+    self._SendHeaders()
+    if self.path == '/':
+      self._RenderTemplate('index.html')
+    elif self.path == '/favico.ico':
+      return
+    elif self.path.startswith('/static'):
+      self._WriteStaticFile(self.path[len('/static/'):])
+    else:
+      request = self.path.split('?')[0]
+      request = request.replace('/', '_')
+      handler = getattr(self, 'GET%s' % request)
+      handler()
 
   def GET_forward(self):
     """Drive forward in a straight line for 1 second."""
@@ -123,7 +128,7 @@ class RoombaWebController(object):
     self.sensors.GetAll()
     self.sensors.sensors['charging-state'] = \
       pyrobot.CHARGING_STATES[self.sensors.sensors['charging-state']]
-    print simplejson.dumps(self.sensors.sensors)
+    self.wfile.write(simplejson.dumps(self.sensors.sensors))
 
   def GET_reset(self):
     """Reset the Roomba."""
@@ -131,13 +136,19 @@ class RoombaWebController(object):
  
 
 def main():
+  assert len(sys.argv) == 3
+  host, port = sys.argv[1:]
+  port = int(port)
   controller = RoombaWebController()
   controller.ResetRoomba()
-  controller.StartWebcam()
-  controller.StartMicrophone()
-  web.webapi.internalerror = web.debugerror
-  urls = ('/(.*)', 'controller')
-  web.run(urls, locals())
+  server = BaseHTTPServer.HTTPServer((host, port), controller)
+  print 'http://%s:%d/' % (host, port)
+  try:
+    server.serve_forever()
+  except KeyboardInterrupt:
+    pass
+  finally:
+    server.close()
 
 
 if __name__ == '__main__':

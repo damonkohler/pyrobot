@@ -258,6 +258,10 @@ class RoombaSensors(object):
     self.roomba = roomba
     self.sensors = {}
 
+  def __itemgetter__(self, name):
+    """Indexes into sensor data."""
+    return self.sensors[name]
+
   def Poll(self):
     """Keep sensor data up to date by polling for it periodically.
 
@@ -420,10 +424,13 @@ class Roomba(object):
     self.sci.baud(baud_rate)
     self.sci = SerialCommandInterface(self.tty, baud_rate)
 
-  def Control(self):
+  def Control(self, safe=True):
     """Start the robot's SCI interface and place it in safe mode."""
     self.sci.start()
-    self.sci.control()
+    if safe:
+      self.sci.control()
+    else:
+      self.sci.full()
 
   def Drive(self, velocity, radius):
     """Controls Roomba's drive wheels.

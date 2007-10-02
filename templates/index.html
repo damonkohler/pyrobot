@@ -4,10 +4,18 @@
   <head>
     <title>PyRobot Web UI</title>
     <style type="text/css">
-      table.sensors { font-size: small; border: 0px; width: 30em; }
-      table.sensors th { border: 0px; border-bottom: 1px solid #aaaaaa; }
-      table.sensors td { border: 0px; }
-      table.sensors th, table.sensors td { padding: 3px; }
+      body { font-size: small; }
+      table.sensors {
+        border: 0px;
+        border-collapse: collapse;
+        padding: 0px;
+        margin: 0px;
+        font-size: 0.7em;
+        width: 30em;
+      }
+      table.sensors tr:hover { background-color: #ddd; }
+      table.sensors th { text-align: left; }
+     }
     </style>
     <script type="text/javascript" src="/static/MochiKit/MochiKit.js"></script>
     <script type="text/javascript">
@@ -16,8 +24,9 @@
         for (attr in obj) {
           rows.push([attr, obj[attr]]);
         }
+        rows.sort(function(a, b) { return ((a[0] < b[0]) ? -1 : 1); });
         row_display = function (row) {
-          return TR(null, map(partial(TD, null), row));
+          return TR({'id': row[0]}, map(partial(TD, null), row));
         }
         var newTable = TABLE({'id': 'sensors', 'class': 'sensors'},
           TH(null, 'Sensor'),
@@ -26,8 +35,9 @@
         return newTable
       }
 
-      updateSensorData = function() {
-        var url = '/sensors';
+      updateSensorData = function(last_sensor_data) {
+        var now = new Date();
+        var url = '/sensors?' + now.getTime();
         var d = MochiKit.Async.loadJSONDoc(url);
         d.addCallback(function(r) {
           new_sensor_table = buildTableFromObj(r);
@@ -36,28 +46,26 @@
             doc = currentDocument();
             MochiKit.DOM.appendChildNodes(doc.body, new_sensor_table);
           } else {
-            swapDom(sensor_table, new_sensor_table);
+            MochiKit.DOM.swapDOM(sensor_table, new_sensor_table);
           }
+          for (attr in r) {
+            if (r[attr] != last_sensor_data[attr]) {
+              MochiKit.Visual.Highlight(attr);
+            }
+          }
+          MochiKit.Async.callLater(30, updateSensorData, r);
         });
-        MochiKit.Async.callLater(5, updateSensorData);
+        d.addErrback(function(e) {
+          MochiKit.Async.callLater(5, updateSensorData, {'error': e});
+        });
       }
       
       MochiKit.Signal.connect(window, 'onload', updateSensorData);
-
-      updateWebcam = function() {
-        var now = new Date();
-        webcam_img = getElement('webcam');
-        webcam_img.src = '/static/webcam.png?' + now.getTime();
-        MochiKit.Async.callLater(2, updateWebcam);
-      }
-
-      MochiKit.Signal.connect(window, 'onload', updateWebcam);
     </script>
   </head>
   <body>
-    <img id="webcam" src="/static/webcam.png">
+    <img id="webcam" src="http://damonkohler.dnsalias.net:8081">
     <br>
-    <a href="/static/sound.ogg">Listen</a> |
     <a href="#"
       onclick="javascript:MochiKit.Async.loadJSONDoc('/forward');
         return false;">Forward</a> |
