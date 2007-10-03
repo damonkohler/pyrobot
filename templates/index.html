@@ -36,9 +36,7 @@
       }
 
       updateSensorData = function(last_sensor_data) {
-        var now = new Date();
-        var url = '/sensors?' + now.getTime();
-        var d = MochiKit.Async.loadJSONDoc(url);
+        var d = MochiKit.Async.loadJSONDoc('/sensors');
         d.addCallback(function(r) {
           new_sensor_table = buildTableFromObj(r);
           sensor_table = getElement('sensors');

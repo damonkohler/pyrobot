@@ -22,35 +22,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-"""A web-based user interface using PyRobot.
+"""A web-based user interface using PyRobot and GSD."""
 
-This web interface is designed for use with an OLPC controlled Roomba.
-
-"""
 __author__ = "damonkohler@gmail.com (Damon Kohler)"
 
 import os
 import sys
 import time
 import simplejson
-import BaseHTTPServer
-
+import gsd
 import pyrobot
 
 
-class RoombaWebController(BaseHTTPServer.BaseHTTPRequestHandler):
+class RoombaWebController(gsd.App):
 
   """Control and monitor the Roomba through a web interface."""
 
   def __init__(self):
     self.roomba = None
     self.sensors = None
-
-  def __call__(self, *args, **kwargs):
-    """We want a single controller across all threads."""
-    # BaseHTTPRequestHandler is old-style. No super for us! :(
-    BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, *args, **kwargs)
-    return self
 
   def ResetRoomba(self):
     """Create a new Roomba and RoombaSensors, wake it, and control it."""
@@ -59,40 +49,13 @@ class RoombaWebController(BaseHTTPServer.BaseHTTPRequestHandler):
     self.roomba.sci.Wake()
     self.roomba.Control(safe=False)
 
-  def _SendHeaders(self):
-    """Send response headers."""
-    self.send_response(200)
-    self.send_header("Content-type", "text/html")
-    self.end_headers()
+  def GET_(self):
+    """Render main UI."""
+    self.Render('templates/index.html', locals())
 
-  def _RenderTemplate(self, template):
-    """Render a template to the output stream."""
-    template_file = open(os.path.join('templates', template))
-    self.wfile.write(template_file.read())
-
-  def _WriteStaticFile(self, static):
-    """Write a static file to the output stream."""
-    static_file = open(os.path.join('static', static))
-    self.wfile.write(static_file.read())
-
-  def do_HEAD(self):
-    """Send headers on HEAD request."""
-    self._SendHeaders()
-
-  def do_GET(self):
-    """Render index template or delegate to another GET handler."""
-    self._SendHeaders()
-    if self.path == '/':
-      self._RenderTemplate('index.html')
-    elif self.path == '/favico.ico':
-      return
-    elif self.path.startswith('/static'):
-      self._WriteStaticFile(self.path[len('/static/'):])
-    else:
-      request = self.path.split('?')[0]
-      request = request.replace('/', '_')
-      handler = getattr(self, 'GET%s' % request)
-      handler()
+  def GET_favico_ico(self):
+    """Ignore requets for favico.ico."""
+    pass
 
   def GET_forward(self):
     """Drive forward in a straight line for 1 second."""
@@ -136,20 +99,15 @@ class RoombaWebController(BaseHTTPServer.BaseHTTPRequestHandler):
  
 
 def main():
-  assert len(sys.argv) == 3
+  if not len(sys.argv) == 3:
+    print 'python web_ui.py host port'
+    sys.exit(1)
   host, port = sys.argv[1:]
   port = int(port)
   controller = RoombaWebController()
   controller.ResetRoomba()
-  server = BaseHTTPServer.HTTPServer((host, port), controller)
   print 'http://%s:%d/' % (host, port)
-  try:
-    server.serve_forever()
-  except KeyboardInterrupt:
-    pass
-  finally:
-    server.close()
-
+  controller.Serve(host, port) 
 
 if __name__ == '__main__':
   main()
