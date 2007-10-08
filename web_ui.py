@@ -34,24 +34,40 @@ import gsd
 import pyrobot
 
 
-class RoombaWebController(gsd.App):
+class CreateWebController(gsd.App):
 
-  """Control and monitor the Roomba through a web interface."""
+  """Control and monitor the Create through a web interface."""
 
   def __init__(self):
-    self.roomba = None
+    self.robot = None
     self.sensors = None
 
-  def ResetRoomba(self):
-    """Create a new Roomba and RoombaSensors, wake it, and control it."""
-    self.roomba = pyrobot.Roomba()
-    self.sensors = pyrobot.RoombaSensors(self.roomba)
-    self.roomba.sci.Wake()
-    self.roomba.Control(safe=False)
+  def ResetCreate(self):
+    """Create a new Create and CreateSensors, wake it, and control it."""
+    self.robot = pyrobot.Create()
+    self.sensors = pyrobot.CreateSensors(self.robot)
+    self.robot.Control(safe=False)
+
+  def StopForObstacle(self, delay):
+    """If we encounter an obstacle, reverse for a moment and return True."""
+    start = time.time()
+    while time.time() < start + delay:
+      self.sensors.GetAll()
+      sensors = self.sensors.sensors
+      if (sensors['bump-left'] or
+          sensors['bump-right'] or
+          sensors['virtual-wall']):
+        # We have to be going forward to trip the wall sensor, so negative
+        # velocity has to be correct.
+        self.robot.DriveStraight(-pyrobot.VELOCITY_SLOW)
+        time.sleep(1)
+        self.robot.Stop()
+        return True
+      time.sleep(0.1)
 
   def GET_(self):
     """Render main UI."""
-    self.Render('templates/index.html', locals())
+    self.Render(open('templates/index.html').read(), locals())
 
   def GET_favico_ico(self):
     """Ignore requets for favico.ico."""
@@ -59,32 +75,31 @@ class RoombaWebController(gsd.App):
 
   def GET_forward(self):
     """Drive forward in a straight line for 1 second."""
-    self.roomba.DriveStraight(pyrobot.VELOCITY_FAST)
-    time.sleep(1)
-    self.roomba.SlowStop(pyrobot.VELOCITY_FAST)
+    self.robot.DriveStraight(pyrobot.VELOCITY_FAST)
+    if not self.StopForObstacle(1):
+      self.robot.SlowStop(pyrobot.VELOCITY_FAST)
 
   def GET_reverse(self):
     """Drive backward in a straight line for 1 second."""
-    self.roomba.DriveStraight(-pyrobot.VELOCITY_FAST)
+    self.robot.DriveStraight(-pyrobot.VELOCITY_FAST)
     time.sleep(1)
-    self.roomba.SlowStop(-pyrobot.VELOCITY_FAST)
+    self.robot.SlowStop(-pyrobot.VELOCITY_FAST)
 
   def GET_left(self):
     """Turn in place to the left."""
-    self.roomba.TurnInPlace(pyrobot.VELOCITY_SLOW, 'ccw')
-    time.sleep(0.5)
-    self.roomba.Stop()
+    self.robot.TurnInPlace(pyrobot.VELOCITY_SLOW, 'ccw')
+    time.sleep(0.25)
+    self.robot.Stop()
 
   def GET_right(self):
     """Turn in place to the right."""
-    self.roomba.TurnInPlace(pyrobot.VELOCITY_SLOW, 'cw')
-    time.sleep(0.5)
-    self.roomba.Stop()
+    self.robot.TurnInPlace(pyrobot.VELOCITY_SLOW, 'cw')
+    time.sleep(0.25)
+    self.robot.Stop()
 
   def GET_dock(self):
     """Start docking procedures."""
-    self.roomba.sci.force_seeking_dock()
-    self.roomba.sci.clean()
+    self.robot.sci.force_seeking_dock()
 
   def GET_sensors(self):
     """Return a JSON object with various sensor data."""
@@ -94,8 +109,8 @@ class RoombaWebController(gsd.App):
     self.wfile.write(simplejson.dumps(self.sensors.sensors))
 
   def GET_reset(self):
-    """Reset the Roomba."""
-    self.ResetRoomba()
+    """Reset the Create."""
+    self.ResetCreate()
  
 
 def main():
@@ -104,10 +119,11 @@ def main():
     sys.exit(1)
   host, port = sys.argv[1:]
   port = int(port)
-  controller = RoombaWebController()
-  controller.ResetRoomba()
+  controller = CreateWebController()
+  controller.ResetCreate()
   print 'http://%s:%d/' % (host, port)
   controller.Serve(host, port) 
+
 
 if __name__ == '__main__':
   main()

@@ -182,8 +182,8 @@ RADIUS_STRAIGHT = 32768
 RADIUS_MAX = 2000
 
 VELOCITY_MAX = 500  # mm/s
-VELOCITY_SLOW = VELOCITY_MAX * 0.33
-VELOCITY_FAST = VELOCITY_MAX * 0.66
+VELOCITY_SLOW = int(VELOCITY_MAX * 0.33)
+VELOCITY_FAST = int(VELOCITY_MAX * 0.66)
 
 WHEEL_SEPARATION = 298  # mm
 
@@ -376,7 +376,7 @@ class RoombaSensors(object):
 
   def DecodeBool(self, name, byte):
     """Decode 'byte' as a bool and map it to 'name'."""
-    self.sensors[name] = bool(byte)
+    self.sensors[name] = bool(struct.unpack('B', byte)[0])
 
   # NOTE(damonkohler): We specify the low byte first to make it easier when
   # popping bytes off a list.
@@ -427,9 +427,8 @@ class Roomba(object):
   def Control(self, safe=True):
     """Start the robot's SCI interface and place it in safe mode."""
     self.sci.start()
-    if safe:
-      self.sci.control()
-    else:
+    self.sci.control()  # Also puts the Roomba in to safe mode.
+    if not safe:
       self.sci.full()
 
   def Drive(self, velocity, radius):
@@ -475,7 +474,7 @@ class Roomba(object):
       velocities = xrange(velocity, -VELOCITY_SLOW, 25)
     for v in velocities:
       self.Drive(v, RADIUS_STRAIGHT)
-      time.sleep(0.25)
+      time.sleep(0.05)
     self.Stop()
 
   def DriveStraight(self, velocity):
@@ -500,8 +499,18 @@ class Create(Roomba):
 
   """Represents a Create robot."""
 
-  pass
+  def __init__(self, tty='/dev/ttyUSB0'):
+    super(Create, self).__init__(tty)
+    self.sci.AddOpcodes(CREATE_OPCODES)
 
+  def Control(self, safe=True):
+    """Start the robot's SCI interface and place it in safe or full mode."""
+    self.sci.start()
+    if safe:
+      self.sci.safe()
+    else:
+      self.sci.full()
+    
 
 if __name__ == '__main__':
   """Do a little dance."""
