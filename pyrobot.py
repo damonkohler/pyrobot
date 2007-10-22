@@ -38,11 +38,12 @@ SerialCommandInterface class is also used for OI.
 """
 __author__ = "damonkohler@gmail.com (Damon Kohler)"
 
+import logging
+import math
 import serial
 import struct
 import time
 import threading
-import math
 
 ROOMBA_OPCODES = dict(
     start = 128,
@@ -64,6 +65,8 @@ ROOMBA_OPCODES = dict(
     )
 
 CREATE_OPCODES = dict(
+    soft_reset = 7,  # Where is this documented?
+    low_side_drivers = 138,
     pwm_low_side_drivers = 144,
     direct_drive = 145,
     digital_outputs = 147,
@@ -187,6 +190,8 @@ VELOCITY_FAST = int(VELOCITY_MAX * 0.66)
 
 WHEEL_SEPARATION = 298  # mm
 
+SERIAL_TIMEOUT = 2  # Number of seconds to wait for reads. 2 is generous.
+
 
 assert struct.calcsize('H') == 2, 'Expecting 2-byte shorts.'
 
@@ -202,12 +207,9 @@ class SerialCommandInterface(object):
 
   """
   def __init__(self, tty, baudrate):
-    self.ser = serial.Serial(tty, baudrate=baudrate)
+    self.ser = serial.Serial(tty, baudrate=baudrate, timeout=SERIAL_TIMEOUT)
     self.ser.open()
     self.opcodes = {}
-    self.lock = threading.RLock()
-    # TODO(damonkohler): Set up locking for polling and reading sensor data in
-    # a separate thread.
 
   def __del__(self):
     self.ser.close()
@@ -229,8 +231,14 @@ class SerialCommandInterface(object):
 
   def Read(self, num_bytes):
     """Read a string of 'num_bytes' bytes from the robot."""
-    #return struct.unpack('B' * num_bytes, self.ser.read(num_bytes))
-    return self.ser.read(num_bytes)
+    data = self.ser.read(num_bytes)
+    if not data or len(data) != num_bytes:
+      raise PyRobotError('Error reading from SCI port.')
+    return data
+
+  def FlushInput(self):
+    """Flush input buffer, discarding all its contents."""
+    self.ser.flushInput()
 
   def __getattr__(self, name):
     """Creates methods for opcodes on the fly.
@@ -241,6 +249,7 @@ class SerialCommandInterface(object):
     """
     if name in self.opcodes:
       def SendOpcode(*bytes):
+        logging.debug('Sending opcode %s.' % name)
         self.Send([self.opcodes[name]] + list(bytes))
       return SendOpcode
     raise AttributeError
@@ -257,6 +266,7 @@ class RoombaSensors(object):
   def __init__(self, roomba):
     self.roomba = roomba
     self.sensors = {}
+    self.lock = threading.Lock()
 
   def __itemgetter__(self, name):
     """Indexes into sensor data."""
@@ -272,10 +282,20 @@ class RoombaSensors(object):
     """
     pass
 
-  def GetAll(self):
+  def GetAll(self, blocking=True):
     """Request and decode all available sensor data."""
+    if not self.lock.acquire(0):  # Non-blocking.
+      # NOTE(damonkohler): Rather than pound the Create asking for sensor
+      # data, if someone else started collecting it already, just wait for
+      # them to finish.
+      if blocking:
+        self.lock.acquire()
+      return
     self.roomba.sci.sensors(0)
-    bytes = self.roomba.sci.Read(26)
+    try:
+      bytes = self.roomba.sci.Read(26)
+    finally:
+      self.lock.release()
     bytes = list(bytes)
     # NOTE(damonkohler): We decode sensor data in reverse order for better pop
     # performance.
@@ -487,6 +507,13 @@ class Roomba(object):
                         'ccw': RADIUS_TURN_IN_PLACE_CCW}
     self.Drive(velocity, valid_directions[direction])
 
+  def Dock(self):
+    """Start looking for the dock and then dock."""
+    # NOTE(damonkohler): For some reason, it seems to require sending this
+    # twice.
+    self.sci.force_seeking_dock()
+    self.sci.force_seeking_dock()
+
 
 class CreateSensors(RoombaSensors):
 
@@ -510,6 +537,26 @@ class Create(Roomba):
       self.sci.safe()
     else:
       self.sci.full()
+
+  def PowerLowSideDrivers(self, drivers):
+    """Enable or disable power to low side drivers.
+    
+    'drivers' should be a list of booleans indicating which low side drivers
+    should be powered.
+
+    """
+    assert len(drivers) == 3
+    byte = 0
+    for driver, power in enumerate(drivers):
+      byte += (2 ** driver) * int(power)
+    self.sci.low_side_drivers(byte)
+
+  def SoftReset(self):
+    """Do a soft reset of the Create."""
+    self.sci.soft_reset()
+    time.sleep(3.5)
+    self.sci.start()  # Put the robot back in passive mode.
+    self.sci.FlushInput()  # Sometimes there's turds in the receive buffer.
     
 
 if __name__ == '__main__':
