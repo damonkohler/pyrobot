@@ -35,6 +35,7 @@ import simplejson
 import gsd
 import pyrobot
 import arduino_controller
+import olpc
 
 MINIMUM_BATTERY_LEVEL = 12000  # mV
 MAXIMUM_BATTERY_LEVEL = 15000  # mV
@@ -121,6 +122,8 @@ class RobotWebController(gsd.App):
     self.robot.Control(safe=False)
     #self.power_manager.Stop()  # Just in case we're trying to restart.
     #self.power_manager.StartBatteryMonitor()
+    olpc_pm = olpc.PowerManager()
+    olpc_pm.SetDconSleep(True)
 
   def StopForObstacle(self, delay):
     """If we encounter an obstacle, reverse for a moment and return True."""
@@ -181,46 +184,68 @@ class RobotWebController(gsd.App):
 
   def GET_sensors(self):
     """Return a JSON object with various sensor data."""
+    sensors = {}
     try:
       self.sensors.GetAll(blocking=False)
-      state = self.sensors.sensors['charging-state']
-      self.sensors.sensors['charging-state'] = pyrobot.CHARGING_STATES[state]
     except pyrobot.PyRobotError:
       logging.debug('Failed to retrieve sensor data.')
-    except KeyError:
-      logging.debug('Bad sensor data :( No charging state found.')
-    except IndexError:
-      logging.debug('Bad sensor data :( Invalid charging state %r' % state)
-    except TypeError:
-      logging.debug('Bad sensor data :( Invalid charging state %r' % state)
-    self.wfile.write(simplejson.dumps(self.sensors.sensors))
+    else:
+      state = self.sensors.sensors['charging-state']
+      try:
+        self.sensors.sensors['charging-state'] = pyrobot.CHARGING_STATES[state]
+      except KeyError:
+        logging.debug('Bad sensor data :( No charging state found.')
+      except IndexError:
+        logging.debug('Bad sensor data :( Invalid charging state %r' % state)
+      except TypeError:
+        logging.debug('Bad sensor data :( Invalid charging state %r' % state)
+    sensors.update(self.sensors.sensors)
+
+    olpc_pm = olpc.PowerManager()
+    sensors['olpc_capacity'] = olpc_pm.GetCapacity()
+    sensors['olpc_capacity_level'] = olpc_pm.GetCapacityLevel()
+    sensors['olpc_current_avg'] = olpc_pm.GetCurrentAvg()
+    sensors['olpc_voltage_avg'] = olpc_pm.GetVoltageAvg()
+    sensors['olpc_health'] = olpc_pm.GetHealth()
+    sensors['olpc_temp'] = olpc_pm.GetTemp()
+    sensors['olpc_temp_ambient'] = olpc_pm.GetTempAmbient()
+    sensors['olpc_status'] = olpc_pm.GetStatus()
+
+    self.wfile.write(simplejson.dumps(sensors))
 
   def GET_light_on(self):
     """Turn the light on."""
+    logging.debug('Turning the light on.')
     self.arduino.Light(True)
 
   def GET_light_off(self):
     """Turn the light off."""
+    logging.debug('Turning the light off.')
     self.arduino.Light(False)
 
   def GET_create_on(self):
     """Turn the robot on."""
+    logging.debug('Turning the robot on.')
     self.arduino.Power(True)
 
   def GET_create_off(self):
-    """Turn the robot on."""
+    """Turn the robot off."""
+    logging.debug('Turning the robot off.')
     self.arduino.Power(False)
 
   def GET_relay_on(self):
     """Turn the relay on and connect the OLPC power."""
+    logging.debug('Turning the relay on.')
     self.arduino.Relay(True)
 
   def GET_relay_off(self):
     """Turn the relay off and disconnect the OLPC power."""
+    logging.debug('Turning the relay off.')
     self.arduino.Relay(False)
 
   def GET_restart(self):
     """Attempt to connect to the Create again."""
+    logging.debug('Restarting...')
     self.Start()
 
   def GET_soft_reset(self):
@@ -229,16 +254,25 @@ class RobotWebController(gsd.App):
 
   def GET_safe(self):
     """Turn on stopping for obstacles."""
+    logging.debug('Turning on stopping for obstacles.')
     self._stop_for_obstacles = True
 
   def GET_full(self):
     """Turn off stopping for obstacles."""
+    logging.debug('Turning off stopping for obstacles.')
     self._stop_for_obstacles = False
 
   def GET_log(self):
-    """Return a JSON object containing logging messages."""
-    log = self.web_log_stream.getvalue()
+    """Return a JSON object containing the last 500 logging messages."""
+    log = '\n'.join(self.web_log_stream.getvalue().split('\n')[-500:])
     self.wfile.write(simplejson.dumps({'log': log}))
+
+  def GET_say(self, msgs=None):
+    """Use flite to do text to speech."""
+    msgs = msgs or ['Nothing to say.']
+    flite = olpc.Flite()
+    for msg in msgs:
+      flite.Say(msg)
 
 
 def main():

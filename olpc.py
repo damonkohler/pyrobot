@@ -36,6 +36,54 @@ import threading
 import time
 import traceback
 import os
+import logging
+
+
+class PowerManager(object):
+
+  """Access sysfs information about the OLPC's power."""
+
+  def SetDconSleep(self, sleep):
+    if sleep:
+      logging.debug('Putting DCON to sleep.')
+      open('/sys/devices/platform/dcon/sleep', 'w').write('1')
+    else:
+      logging.debug('Waking up DCON.')
+      open('/sys/devices/platform/dcon/sleep', 'w').write('0')
+
+  def GetCapacity(self):
+    return open('/sys/class/power_supply/olpc-battery/capacity').read()
+
+  def GetCapacityLevel(self):
+    return open('/sys/class/power_supply/olpc-battery/capacity_level').read()
+
+  def GetCurrentAvg(self):
+    return open('/sys/class/power_supply/olpc-battery/current_avg').read()
+
+  def GetVoltageAvg(self):
+    return open('/sys/class/power_supply/olpc-battery/voltage_avg').read()
+
+  def GetHealth(self):
+    return open('/sys/class/power_supply/olpc-battery/health').read()
+
+  def GetTemp(self):
+    return open('/sys/class/power_supply/olpc-battery/temp').read()
+
+  def GetTempAmbient(self):
+    return open('/sys/class/power_supply/olpc-battery/temp_ambient').read()
+
+  def GetStatus(self):
+    return open('/sys/class/power_supply/olpc-battery/status').read()
+
+
+class Flite(object):
+
+  """Use flite to perform text to speech operations."""
+
+  def Say(self, msg):
+    cmd = "/home/olpc/flite -t %r" % msg
+    logging.debug('Executing %r.' % cmd)
+    os.system(cmd)
 
 
 class Microphone(object):
