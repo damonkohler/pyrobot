@@ -75,6 +75,19 @@ class PowerManager(object):
   def GetStatus(self):
     return open('/sys/class/power_supply/olpc-battery/status').read()
 
+  def GetAllSensorData(self):
+    """Return a dict of all sensor data."""
+    sensor_data = {}
+    sensor_data['olpc_capacity'] = self.GetCapacity()
+    sensor_data['olpc_capacity_level'] = self.GetCapacityLevel()
+    sensor_data['olpc_current_avg'] = self.GetCurrentAvg()
+    sensor_data['olpc_voltage_avg'] = self.GetVoltageAvg()
+    sensor_data['olpc_health'] = self.GetHealth()
+    sensor_data['olpc_temp'] = self.GetTemp()
+    sensor_data['olpc_temp_ambient'] = self.GetTempAmbient()
+    sensor_data['olpc_status'] = self.GetStatus()
+    return sensor_data
+
 
 class Flite(object):
 
@@ -96,7 +109,7 @@ class Microphone(object):
     self.lock = threading.Lock()
     self.pipe = self._GetMicrophonePipe(self._tmp_path)
     self.ConfigureAlsa()
- 
+
   def ConfigureAlsa(self):
     # Playback settings.
     os.system("amixer set 'Master' unmute 25%")
@@ -113,7 +126,7 @@ class Microphone(object):
   def _GetMicrophonePipe(self, record_path):
     pipe = gst.Pipeline('olpc-microphone')
     elems = []
-    
+
     def Add(name):
       elem = gst.element_factory_make(name, name)
       pipe.add(elem)
@@ -179,7 +192,7 @@ class Camera(object):
   def _GetCameraPipe(self, snap_path):
     pipe = gst.Pipeline('olpc-camera')
     elems = []
-    
+
     def Add(name):
       elem = gst.element_factory_make(name, name)
       pipe.add(elem)
@@ -245,4 +258,4 @@ if __name__ == '__main__':
   record_path = 'record.ogg'
   m = Microphone(record_path)
   m.Record()
-  print 'Recorded aduio to %s' % record_path
+  print 'Recorded audio to %s' % record_path

@@ -37,9 +37,6 @@ import pyrobot
 import arduino_controller
 import olpc
 
-MINIMUM_BATTERY_LEVEL = 12000  # mV
-MAXIMUM_BATTERY_LEVEL = 15000  # mV
-
 
 class PowerManager(object):
 
@@ -49,39 +46,53 @@ class PowerManager(object):
     self.arduino = arduino
     self.robot = robot
     self.sensors = sensors
+    self.olpc_pm = olpc.PowerManager()
     self._join = False
     self._battery_monitor = None
 
-  def _WaitForDock(self):
-    """Block until the robot has started charging (i.e. docking complete)."""
-    while True:
-      self.sensors.GetAll()
-      if self.sensors.sensors['charging']:
-        return
-      time.sleep(5)
+  def _GetAggregateSensorData(self):
+    """Return a dict of all robot and OLPC sensor data."""
+    sensor_data = {}
+    self.sensors.GetAll()
+    sensor_data.update(self.sensors.data)
+    sensor_data.update(self.olpc_pm.GetAllSensorData())
+    return sensor_data
 
   def BatteryMonitor(self):
-    """Monitor the Robot's battery level."""
+    """Monitor the robot and OLPC battery levels to control charging.
+
+    The following table illustrates when the batteries will be charging:
+
+                                        Robot      OLPC
+    Charging sources available:           Y          -
+    + Robot battery charging              Y          N
+    + OLPC battery not Normal or Full     Y          Y (overrides prev.)
+    Charging sources not available        N          N
+
+    """
     while not self._join:
-      self.sensors.GetAll()
-      sensors = self.sensors.sensors
-      charging = sensors['charging-state'] in (1, 2, 3)
-      # NOTE(damonkohler): Other users have suggested monitoring voltage instead
-      # because it's more reliable.
-      voltage = sensors['voltage']
-      if (voltage < MINIMUM_BATTERY_LEVEL) and not charging:
-        self.robot.Dock()
-        self._WaitForDock()
-        # Disconnect power to the OLPC.
-        self.arduino.Relay(False)
-      if (voltage > MAXIMUM_BATTERY_LEVEL) and charging:
-        # Reconnect power to the OLPC.
-        self.arduino.Relay(True)
-      time.sleep(5)
+      sensor_data = self._GetAggregateSensorData()
+      if sensor_data['charging-sources-available']:
+        if not sensor_data['charging-state']:
+          self.robot.SoftReset()  # Robot won't charge until we reset it.
+          continue  # Need to update sensor data.
+        if sensor_data['charging-state'] not in (1, 2):
+          # Robot is not charging or is trickle charging.
+          self.arduino.PowerOlpc(True)
+        elif sensor_data['olpc_status'] not in ('Normal', 'Full'):
+          # OLPC power state is getting critical.
+          self.arduino.PowerOlpc(True)
+        else:
+          # Let the robot charge until it's done or the OLPC needs power.
+          self.arduino.PowerOlpc(False)
+      else:
+        # No charging sources available.
+        self.arduino.PowerOlpc(False)
 
   def StartBatteryMonitor(self):
     """Start up the battery monitor."""
     self._battery_monitor = threading.Thread(target=self.BatteryMonitor)
+    self._battery_monitor.setDaemon(True)
     self._battery_monitor.start()
 
   def Stop(self):
@@ -90,6 +101,29 @@ class PowerManager(object):
     if self._battery_monitor is not None:
       self._battery_monitor.join()
     self._join = False
+
+  def Dock(self):
+    """Drive the robot into the docking station.
+
+    This is required since the cover-and-dock demo doesn't drive the robot
+    fast enough to get into the dock when it has extra gear on it (it weighs
+    too much). It would probably work on carpet if it's squishy enough though.
+
+    """
+    while True:
+      sensor_data = self._GetAggregateSensorData()
+      opcode = sensor_data['remote-opcode']
+      if opcode == pyrobot.REMOTE_OPCODES['red_buoy']:
+        self.robot.Drive(pyrobot.VELCOITY_SLOW, 500)
+      if opcode == pyrobot.REMOTE_OPCODES['green_buoy']:
+        self.robot.Drive(pyrobot.VELOCITY_SLOW, -500)
+      if opcode == pyrobot.REMOTE_OPCODES['red_buoy_and_green_buoy']:
+        self.robot.DriveStraight(pyrobot.VELOCITY_FAST)
+      if sensor_data['bump-left'] or sensor_data['bump-right']:
+        self.robot.Stop()
+        self.robot.SoftReset()
+        break
+      time.sleep(1)
 
 
 class RobotWebController(gsd.App):
@@ -106,7 +140,7 @@ class RobotWebController(gsd.App):
     self.web_log_stream = StringIO.StringIO()
     web_log_handler = logging.StreamHandler(self.web_log_stream)
     formatter = logging.Formatter('%(asctime)s %(levelname)-8s %(message)s')
-    web_log_handler.setFormatter(formatter) 
+    web_log_handler.setFormatter(formatter)
     logging.getLogger('').addHandler(web_log_handler)
 
   def Start(self):
@@ -120,17 +154,16 @@ class RobotWebController(gsd.App):
       time.sleep(5)  # HACK(damonkohler): It takes a few seconds to power on.
     self.robot.SoftReset()
     self.robot.Control(safe=False)
-    #self.power_manager.Stop()  # Just in case we're trying to restart.
-    #self.power_manager.StartBatteryMonitor()
-    olpc_pm = olpc.PowerManager()
-    olpc_pm.SetDconSleep(True)
+    self.power_manager.Stop()  # Just in case we're trying to restart.
+    self.power_manager.StartBatteryMonitor()
+    self.power_manager.olpc_pm.SetDconSleep(True)
 
   def StopForObstacle(self, delay):
     """If we encounter an obstacle, reverse for a moment and return True."""
     start = time.time()
     while time.time() < start + delay:
       self.sensors.GetAll()
-      sensors = self.sensors.sensors
+      sensors = self.sensors.data
       if (sensors['bump-left'] or
           sensors['bump-right'] or
           sensors['virtual-wall']):
@@ -184,34 +217,25 @@ class RobotWebController(gsd.App):
 
   def GET_sensors(self):
     """Return a JSON object with various sensor data."""
-    sensors = {}
+    sensor_data = {}
     try:
       self.sensors.GetAll(blocking=False)
     except pyrobot.PyRobotError:
       logging.debug('Failed to retrieve sensor data.')
     else:
-      state = self.sensors.sensors['charging-state']
+      state = self.sensors.data['charging-state']
       try:
-        self.sensors.sensors['charging-state'] = pyrobot.CHARGING_STATES[state]
+        self.sensors.data['charging-state'] = pyrobot.CHARGING_STATES[state]
       except KeyError:
         logging.debug('Bad sensor data :( No charging state found.')
-      except IndexError:
+      except IndexError, TypeError:
         logging.debug('Bad sensor data :( Invalid charging state %r' % state)
-      except TypeError:
-        logging.debug('Bad sensor data :( Invalid charging state %r' % state)
-    sensors.update(self.sensors.sensors)
+    sensor_data.update(self.sensors.data)
 
     olpc_pm = olpc.PowerManager()
-    sensors['olpc_capacity'] = olpc_pm.GetCapacity()
-    sensors['olpc_capacity_level'] = olpc_pm.GetCapacityLevel()
-    sensors['olpc_current_avg'] = olpc_pm.GetCurrentAvg()
-    sensors['olpc_voltage_avg'] = olpc_pm.GetVoltageAvg()
-    sensors['olpc_health'] = olpc_pm.GetHealth()
-    sensors['olpc_temp'] = olpc_pm.GetTemp()
-    sensors['olpc_temp_ambient'] = olpc_pm.GetTempAmbient()
-    sensors['olpc_status'] = olpc_pm.GetStatus()
+    sensor_data.update(olpc_pm.GetAll())
 
-    self.wfile.write(simplejson.dumps(sensors))
+    self.wfile.write(simplejson.dumps(sensor_data))
 
   def GET_light_on(self):
     """Turn the light on."""
@@ -223,25 +247,25 @@ class RobotWebController(gsd.App):
     logging.debug('Turning the light off.')
     self.arduino.Light(False)
 
-  def GET_create_on(self):
+  def GET_robot_on(self):
     """Turn the robot on."""
     logging.debug('Turning the robot on.')
-    self.arduino.Power(True)
+    self.arduino.PowerRobot(True)
 
-  def GET_create_off(self):
+  def GET_robot_off(self):
     """Turn the robot off."""
     logging.debug('Turning the robot off.')
-    self.arduino.Power(False)
+    self.arduino.PowerRobot(False)
 
   def GET_relay_on(self):
     """Turn the relay on and connect the OLPC power."""
     logging.debug('Turning the relay on.')
-    self.arduino.Relay(True)
+    self.arduino.PowerOlpc(True)
 
   def GET_relay_off(self):
     """Turn the relay off and disconnect the OLPC power."""
     logging.debug('Turning the relay off.')
-    self.arduino.Relay(False)
+    self.arduino.PowerOlpc(False)
 
   def GET_restart(self):
     """Attempt to connect to the Create again."""
@@ -289,7 +313,7 @@ def main():
   controller = RobotWebController()
   controller.Start()
   print 'http://%s:%d/' % (host, port)
-  controller.Serve(host, port) 
+  controller.Serve(host, port)
 
 
 if __name__ == '__main__':

@@ -107,9 +107,9 @@ IR_OPCODES = dict(
     force_field = 242,
     green_buoy = 244,
     red_buoy = 248,
-    red_buoy_and_force = 250,
-    red_and_green_buoy = 252,
-    red_green_and_force = 254,
+    red_buoy_and_force_field = 250,
+    red_buoy_and_green_buoy = 252,
+    red_buoy_and_green_buoy_and_force_field = 254,
     )
 
 BAUD_RATES = (  # In bits per second.
@@ -263,40 +263,17 @@ class RoombaSensors(object):
   description, see the Roomba SCI Sepc Manual.
 
   """
-  def __init__(self, roomba):
-    self.roomba = roomba
-    self.sensors = {}
+  def __init__(self, robot):
+    self.robot = robot
+    self.data = {}  # Last sensor readings.
     self.lock = threading.Lock()
 
   def __itemgetter__(self, name):
     """Indexes into sensor data."""
-    return self.sensors[name]
+    return self.data[name]
 
-  def Poll(self):
-    """Keep sensor data up to date by polling for it periodically.
-
-    According to the OI spec, sensor data is updated every 15 ms and should not
-    be polled more often than that. There is no such specification in the SCI
-    spec.
-
-    """
-    pass
-
-  def GetAll(self, blocking=True):
-    """Request and decode all available sensor data."""
-    if not self.lock.acquire(0):  # Non-blocking.
-      # NOTE(damonkohler): Rather than pound the Create asking for sensor
-      # data, if someone else started collecting it already, just wait for
-      # them to finish.
-      if blocking:
-        self.lock.acquire()
-      return
-    self.roomba.sci.sensors(0)
-    try:
-      bytes = self.roomba.sci.Read(26)
-    finally:
-      self.lock.release()
-    bytes = list(bytes)
+  def _DecodeGroupPacket0(self, bytes):
+    """Decode sensord data from a request for group 0 (all data)."""
     # NOTE(damonkohler): We decode sensor data in reverse order for better pop
     # performance.
     self.DecodeUnsignedShort('capacity', bytes.pop(), bytes.pop())  # mAh
@@ -319,6 +296,28 @@ class RoombaSensors(object):
     self.DecodeBool('cliff-left', bytes.pop())
     self.DecodeBool('wall', bytes.pop())
     self.BumpsWheeldrops(bytes.pop())
+
+  def RequestPacket(self, packet_id, blocking=True):
+    """Reqeust a sesnor packet."""
+    if not self.lock.acquire(0):  # Non-blocking.
+      # NOTE(damonkohler): Rather than pound the Create asking for sensor
+      # data, if someone else started collecting it already, just wait for
+      # them to finish.
+      if blocking:
+        self.lock.acquire()
+      return
+    self.robot.sci.sensors(0)
+    try:
+      bytes = self.robot.sci.Read(26)
+    finally:
+      self.lock.release()
+    bytes = list(bytes)
+    return bytes
+
+  def GetAll(self, blocking=True):
+    """Request and decode all available sensor data."""
+    bytes = self.RequestPacket(0, blocking)
+    self._DecodeGroupPacket0(bytes)
 
   def Angle(self, low, high, unit=None):
     """The angle that Roomba has turned through since the angle was last
@@ -346,9 +345,9 @@ class RoombaSensors(object):
       raise PyRobotError('Invalid angle unit specified.')
     self.DecodeShort('angle', low, high)
     if unit == 'radians':
-      self.sensors['angle'] = (2 * self.sensors['angle']) / 258
+      self.data['angle'] = (2 * self.data['angle']) / 258
     if unit == 'degrees':
-      self.sensors['angle'] /= math.pi
+      self.data['angle'] /= math.pi
 
   def BumpsWheeldrops(self, byte):
     """The state of the bump (0 = no bump, 1 = bump) and wheeldrop sensors
@@ -362,7 +361,7 @@ class RoombaSensors(object):
 
     """
     byte = struct.unpack('B', byte)[0]
-    self.sensors.update({
+    self.data.update({
         'wheel-drop-caster': bool(byte & 0x10),
         'wheel-drop-left': bool(byte & 0x08),
         'wheel-drop-right': bool(byte & 0x04),
@@ -375,7 +374,7 @@ class RoombaSensors(object):
 
     """
     byte = struct.unpack('B', byte)[0]
-    self.sensors.update({
+    self.data.update({
         'drive-left': bool(byte & 0x10),
         'drive-right': bool(byte & 0x08),
         'main-brush': bool(byte & 0x04),
@@ -388,7 +387,7 @@ class RoombaSensors(object):
 
     """
     byte = struct.unpack('B', byte)[0]
-    self.sensors.update({
+    self.data.update({
         'power': bool(byte & 0x08),
         'spot': bool(byte & 0x04),
         'clean': bool(byte & 0x02),
@@ -396,25 +395,25 @@ class RoombaSensors(object):
 
   def DecodeBool(self, name, byte):
     """Decode 'byte' as a bool and map it to 'name'."""
-    self.sensors[name] = bool(struct.unpack('B', byte)[0])
+    self.data[name] = bool(struct.unpack('B', byte)[0])
 
   # NOTE(damonkohler): We specify the low byte first to make it easier when
   # popping bytes off a list.
   def DecodeUnsignedShort(self, name, low, high):
     """Map an unsigned short from a 'high' and 'low' bytes to 'name'."""
-    self.sensors[name] = struct.unpack('>H', high + low)[0]
+    self.data[name] = struct.unpack('>H', high + low)[0]
 
   def DecodeShort(self, name, low, high):
     """Map a short from a 'high' and 'low' bytes to 'name'."""
-    self.sensors[name] = struct.unpack('>h', high + low)[0]
+    self.data[name] = struct.unpack('>h', high + low)[0]
 
   def DecodeByte(self, name, byte):
     """Map signed 'byte' to 'name'."""
-    self.sensors[name] = struct.unpack('b', byte)[0]
+    self.data[name] = struct.unpack('b', byte)[0]
 
   def DecodeUnsignedByte(self, name, byte):
     """Map unsigned 'byte' to 'name'."""
-    self.sensors[name] = struct.unpack('B', byte)[0]
+    self.data[name] = struct.unpack('B', byte)[0]
 
 
 class Roomba(object):
@@ -519,7 +518,31 @@ class CreateSensors(RoombaSensors):
 
   """Handles retrieving and decoding the Create's sensor data."""
 
-  pass
+  def _DecodeGroupPacket6(self, bytes):
+    """Decode sensor group packet 6."""
+    self.DecodeShort('left-velocity', bytes.pop(), bytes.pop())  # mm/s
+    self.DecodeShort('right-velocity', bytes.pop(), bytes.pop())  # mm/s
+    self.DecodeShort('radius', bytes.pop(), bytes.pop())  # mm
+    self.DecodeShort('velocity', bytes.pop(), bytes.pop())  # mm/s
+    self.DecodeUnsignedByte('number-of-stream-packets', bytes.pop())
+    self.DecodeBool('song-playing', bytes.pop())
+    self.DecodeUnsignedByte('song-number', bytes.pop())
+    self.DecodeUnsignedByte('charging-sources-available', bytes.pop())
+    self.DecodeUnsignedShort('user-analog-input', bytes.pop(), bytes.pop())
+    self.DecodeUnsignedByte('user-digital-inputs', bytes.pop())
+    self.DecodeUnsignedShort('cliff-right-signal', bytes.pop(), bytes.pop())
+    self.DecodeUnsignedShort(
+        'cliff-front-right-signal', bytes.pop(), bytes.pop())
+    self.DecodeUnsignedShort(
+        'cliff-front-left-signal', bytes.pop(), bytes.pop())
+    self.DecodeUnsignedShort('cliff-left-signal', bytes.pop(), bytes.pop())
+    self.DecodeUnsignedShort('wall-signal', bytes.pop(), bytes.pop())
+    self._DecodeGroupPacket0(bytes)
+
+  def GetAll(self, blocking=True):
+    """Request and decode all available sensor data."""
+    bytes = self.RequestSensorPacket(6, blocking)
+    self._DecodeGroupPacket6(bytes)
 
 
 class Create(Roomba):
@@ -540,12 +563,12 @@ class Create(Roomba):
 
   def PowerLowSideDrivers(self, drivers):
     """Enable or disable power to low side drivers.
-    
+
     'drivers' should be a list of booleans indicating which low side drivers
     should be powered.
 
     """
-    assert len(drivers) == 3
+    assert len(drivers) == 3, 'Expecting 3 low side driver power settings.'
     byte = 0
     for driver, power in enumerate(drivers):
       byte += (2 ** driver) * int(power)
@@ -557,7 +580,7 @@ class Create(Roomba):
     time.sleep(3.5)
     self.sci.start()  # Put the robot back in passive mode.
     self.sci.FlushInput()  # Sometimes there's turds in the receive buffer.
-    
+
 
 if __name__ == '__main__':
   """Do a little dance."""

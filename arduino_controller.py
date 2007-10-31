@@ -63,7 +63,7 @@ class ArduinoController(object):
       raise ArduinoControllerError('Unable to read power status.')
     return bool(int(data))
 
-  def Power(self, power):
+  def PowerRobot(self, power):
     """Power the Create on or off."""
     on = self._CheckPower()
     if power and not on:
@@ -80,9 +80,9 @@ class ArduinoController(object):
     else:
       self.ser.write('D')  # 'D' for dark.
 
-  def Relay(self, power):
+  def PowerOlpc(self, power):
     """Power the relay on or off to connect/disconnect the OLPC."""
     if power:
-      self.ser.write('R')  # 'R' for relay.
-    else:
       self.ser.write('V')  # 'V' for victory.
+    else:
+      self.ser.write('R')  # 'R' for relay.
