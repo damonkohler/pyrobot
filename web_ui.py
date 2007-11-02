@@ -59,35 +59,18 @@ class PowerManager(object):
     return sensor_data
 
   def BatteryMonitor(self):
-    """Monitor the robot and OLPC battery levels to control charging.
-
-    The following table illustrates when the batteries will be charging:
-
-                                        Robot      OLPC
-    Charging sources available:           Y          -
-    + Robot battery charging              Y          N
-    + OLPC battery not Normal or Full     Y          Y (overrides prev.)
-    Charging sources not available        N          N
-
-    """
+    """Monitor the robot and OLPC battery levels to control charging."""
     while not self._join:
       sensor_data = self._GetAggregateSensorData()
       if sensor_data['charging-sources-available']:
+        logging.debug('Charging source available.')
+        self.arduino.PowerOlpc(True)
         if not sensor_data['charging-state']:
           self.robot.SoftReset()  # Robot won't charge until we reset it.
-          continue  # Need to update sensor data.
-        if sensor_data['charging-state'] not in (1, 2):
-          # Robot is not charging or is trickle charging.
-          self.arduino.PowerOlpc(True)
-        elif sensor_data['olpc_status'] not in ('Normal', 'Full'):
-          # OLPC power state is getting critical.
-          self.arduino.PowerOlpc(True)
-        else:
-          # Let the robot charge until it's done or the OLPC needs power.
-          self.arduino.PowerOlpc(False)
       else:
         # No charging sources available.
         self.arduino.PowerOlpc(False)
+      time.sleep(15)
 
   def StartBatteryMonitor(self):
     """Start up the battery monitor."""
@@ -147,7 +130,7 @@ class RobotWebController(gsd.App):
     """Start controlling the robot."""
     logging.debug('Starting up.')
     try:
-      self.arduino.Power(True)
+      self.arduino.PowerRobot(True)
     except arduino_controller.ArduinoControllerError:
       logging.debug('Failed to power on robot.')
     else:
@@ -167,6 +150,7 @@ class RobotWebController(gsd.App):
       if (sensors['bump-left'] or
           sensors['bump-right'] or
           sensors['virtual-wall']):
+        logging.debug('Oof!')
         # We have to be going forward to trip these sensors, so negative
         # velocity has to be correct.
         self.robot.DriveStraight(-pyrobot.VELOCITY_SLOW)
@@ -223,17 +207,19 @@ class RobotWebController(gsd.App):
     except pyrobot.PyRobotError:
       logging.debug('Failed to retrieve sensor data.')
     else:
-      state = self.sensors.data['charging-state']
       try:
+        state = self.sensors.data['charging-state']
         self.sensors.data['charging-state'] = pyrobot.CHARGING_STATES[state]
       except KeyError:
         logging.debug('Bad sensor data :( No charging state found.')
-      except IndexError, TypeError:
+        self.robot.sci.FlushInput()
+      except (IndexError, TypeError):
         logging.debug('Bad sensor data :( Invalid charging state %r' % state)
+        self.robot.sci.FlushInput()
     sensor_data.update(self.sensors.data)
 
     olpc_pm = olpc.PowerManager()
-    sensor_data.update(olpc_pm.GetAll())
+    sensor_data.update(olpc_pm.GetAllSensorData())
 
     self.wfile.write(simplejson.dumps(sensor_data))
 
@@ -280,11 +266,13 @@ class RobotWebController(gsd.App):
     """Turn on stopping for obstacles."""
     logging.debug('Turning on stopping for obstacles.')
     self._stop_for_obstacles = True
+    self.robot.Control(safe=False)
 
   def GET_full(self):
     """Turn off stopping for obstacles."""
     logging.debug('Turning off stopping for obstacles.')
     self._stop_for_obstacles = False
+    self.robot.Control(safe=False)
 
   def GET_log(self):
     """Return a JSON object containing the last 500 logging messages."""
@@ -300,17 +288,23 @@ class RobotWebController(gsd.App):
 
 
 def main():
-  if not len(sys.argv) == 3:
+  if not len(sys.argv) > 2:
     print 'python web_ui.py host port'
     sys.exit(1)
-  host, port = sys.argv[1:]
+  host, port = sys.argv[1:3]
   port = int(port)
+
+  arduino_tty = '/dev/ttyUSB0'
+  robot_tty = '/dev/ttyUSB1'
+  if len(sys.argv) == 5:
+    arduino_tty = sys.argv[3]
+    robot_tty = sys.argv[4]  
 
   logging.basicConfig(level=logging.DEBUG,
                       format='%(asctime)s %(levelname)-8s %(message)s',
                       datefmt='%Y.%m.%d %H:%M:%S')
 
-  controller = RobotWebController()
+  controller = RobotWebController(arduino_tty, robot_tty)
   controller.Start()
   print 'http://%s:%d/' % (host, port)
   controller.Serve(host, port)

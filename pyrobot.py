@@ -134,6 +134,14 @@ CHARGING_STATES = (
     'waiting',
     'charging-error')
 
+OI_MODES = (
+    'off',
+    'passive',
+    'safe',
+    'full')
+
+SENSOR_GROUP_PACKET_LENGTHS = (26, 10, 6, 10, 14, 12, 52)
+
 # From: http://www.harmony-central.com/MIDI/Doc/table2.html
 MIDI_TABLE = {'rest': 0, 'R': 0, 'pause': 0,
               'G1': 31, 'G#1': 32, 'A1': 33,
@@ -231,9 +239,13 @@ class SerialCommandInterface(object):
 
   def Read(self, num_bytes):
     """Read a string of 'num_bytes' bytes from the robot."""
+    logging.debug('Attempting to read %d bytes from SCI port.' % num_bytes)
     data = self.ser.read(num_bytes)
-    if not data or len(data) != num_bytes:
-      raise PyRobotError('Error reading from SCI port.')
+    logging.debug('Read %d bytes from SCI port.' % len(data))
+    if not data:
+      raise PyRobotError('Error reading from SCI port. No data.')
+    if len(data) != num_bytes:
+      raise PyRobotError('Error reading from SCI port. Wrong data length.')
     return data
 
   def FlushInput(self):
@@ -306,9 +318,10 @@ class RoombaSensors(object):
       if blocking:
         self.lock.acquire()
       return
-    self.robot.sci.sensors(0)
+    self.robot.sci.sensors(packet_id)
     try:
-      bytes = self.robot.sci.Read(26)
+      length = SENSOR_GROUP_PACKET_LENGTHS[packet_id]
+      bytes = self.robot.sci.Read(length)
     finally:
       self.lock.release()
     bytes = list(bytes)
@@ -317,7 +330,8 @@ class RoombaSensors(object):
   def GetAll(self, blocking=True):
     """Request and decode all available sensor data."""
     bytes = self.RequestPacket(0, blocking)
-    self._DecodeGroupPacket0(bytes)
+    if bytes is not None:
+      self._DecodeGroupPacket0(bytes)
 
   def Angle(self, low, high, unit=None):
     """The angle that Roomba has turned through since the angle was last
@@ -527,6 +541,7 @@ class CreateSensors(RoombaSensors):
     self.DecodeUnsignedByte('number-of-stream-packets', bytes.pop())
     self.DecodeBool('song-playing', bytes.pop())
     self.DecodeUnsignedByte('song-number', bytes.pop())
+    self.DecodeUnsignedByte('oi-mode', bytes.pop())
     self.DecodeUnsignedByte('charging-sources-available', bytes.pop())
     self.DecodeUnsignedShort('user-analog-input', bytes.pop(), bytes.pop())
     self.DecodeUnsignedByte('user-digital-inputs', bytes.pop())
@@ -541,8 +556,9 @@ class CreateSensors(RoombaSensors):
 
   def GetAll(self, blocking=True):
     """Request and decode all available sensor data."""
-    bytes = self.RequestSensorPacket(6, blocking)
-    self._DecodeGroupPacket6(bytes)
+    bytes = self.RequestPacket(6, blocking)
+    if bytes is not None:
+      self._DecodeGroupPacket6(bytes)
 
 
 class Create(Roomba):
