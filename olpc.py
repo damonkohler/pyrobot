@@ -93,6 +93,9 @@ class Flite(object):
 
   """Use flite to perform text to speech operations."""
 
+  def __init__(self):
+    os.system('modprobe snd-pcm-oss')  # Make sure /dev/dsp is set up.
+
   def Say(self, msg):
     cmd = "/home/olpc/flite -t %r" % msg
     logging.debug('Executing %r.' % cmd)

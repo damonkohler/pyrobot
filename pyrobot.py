@@ -22,6 +22,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+from __future__ import with_statement
+
 """iRobot Roomba Serial Control Interface (SCI) and Create Open Interface (OI).
 
 PyRobot was originally based on openinterface.py, developed by iRobot
@@ -218,14 +220,12 @@ class SerialCommandInterface(object):
     self.ser = serial.Serial(tty, baudrate=baudrate, timeout=SERIAL_TIMEOUT)
     self.ser.open()
     self.opcodes = {}
-
-  def __del__(self):
-    self.ser.close()
+    self.lock = threading.RLock()
 
   def Wake(self):
     """Wake up robot."""
     self.ser.setRTS(0)
-    time.sleep(0.1)
+    time.sleep(0.25)
     self.ser.setRTS(1)
     time.sleep(1)  # Technically it should wake after 500ms.
 
@@ -235,12 +235,17 @@ class SerialCommandInterface(object):
 
   def Send(self, bytes):
     """Send a string of bytes to the robot."""
-    self.ser.write(struct.pack('B' * len(bytes), *bytes))
+    with self.lock:
+      self.ser.write(struct.pack('B' * len(bytes), *bytes))
+      # HACK(damonkohler): The robot seems happier (read more stable) if you
+      # give it some time to process SCI port commands.
+      time.sleep(0.1)  
 
   def Read(self, num_bytes):
     """Read a string of 'num_bytes' bytes from the robot."""
     logging.debug('Attempting to read %d bytes from SCI port.' % num_bytes)
-    data = self.ser.read(num_bytes)
+    with self.lock:
+      data = self.ser.read(num_bytes)
     logging.debug('Read %d bytes from SCI port.' % len(data))
     if not data:
       raise PyRobotError('Error reading from SCI port. No data.')
@@ -250,6 +255,7 @@ class SerialCommandInterface(object):
 
   def FlushInput(self):
     """Flush input buffer, discarding all its contents."""
+    logging.debug('Flushing serial input buffer.')
     self.ser.flushInput()
 
   def __getattr__(self, name):
@@ -278,9 +284,12 @@ class RoombaSensors(object):
   def __init__(self, robot):
     self.robot = robot
     self.data = {}  # Last sensor readings.
-    self.lock = threading.Lock()
 
-  def __itemgetter__(self, name):
+  def Clear(self):
+    """Clear out old sensor data."""
+    self.data = {}
+
+  def __getitem__(self, name):
     """Indexes into sensor data."""
     return self.data[name]
 
@@ -309,29 +318,18 @@ class RoombaSensors(object):
     self.DecodeBool('wall', bytes.pop())
     self.BumpsWheeldrops(bytes.pop())
 
-  def RequestPacket(self, packet_id, blocking=True):
+  def RequestPacket(self, packet_id):
     """Reqeust a sesnor packet."""
-    if not self.lock.acquire(0):  # Non-blocking.
-      # NOTE(damonkohler): Rather than pound the Create asking for sensor
-      # data, if someone else started collecting it already, just wait for
-      # them to finish.
-      if blocking:
-        self.lock.acquire()
-      return
     self.robot.sci.sensors(packet_id)
-    try:
-      length = SENSOR_GROUP_PACKET_LENGTHS[packet_id]
-      bytes = self.robot.sci.Read(length)
-    finally:
-      self.lock.release()
-    bytes = list(bytes)
-    return bytes
+    length = SENSOR_GROUP_PACKET_LENGTHS[packet_id]
+    return list(self.robot.sci.Read(length))
 
-  def GetAll(self, blocking=True):
+  def GetAll(self):
     """Request and decode all available sensor data."""
-    bytes = self.RequestPacket(0, blocking)
-    if bytes is not None:
-      self._DecodeGroupPacket0(bytes)
+    with self.robot.sci.lock:
+      bytes = self.RequestPacket(0)
+      if bytes is not None:
+        self._DecodeGroupPacket0(bytes)
 
   def Angle(self, low, high, unit=None):
     """The angle that Roomba has turned through since the angle was last
@@ -438,6 +436,7 @@ class Roomba(object):
     self.tty = tty
     self.sci = SerialCommandInterface(tty, 57600)
     self.sci.AddOpcodes(ROOMBA_OPCODES)
+    self.sensors = RoombaSensors(self)
 
   def ChangeBaudRate(self, baud_rate):
     """Sets the baud rate in bits per second (bps) at which SCI commands and
@@ -554,11 +553,12 @@ class CreateSensors(RoombaSensors):
     self.DecodeUnsignedShort('wall-signal', bytes.pop(), bytes.pop())
     self._DecodeGroupPacket0(bytes)
 
-  def GetAll(self, blocking=True):
+  def GetAll(self):
     """Request and decode all available sensor data."""
-    bytes = self.RequestPacket(6, blocking)
-    if bytes is not None:
-      self._DecodeGroupPacket6(bytes)
+    with self.robot.sci.lock:
+      bytes = self.RequestPacket(6)
+      if bytes is not None:
+        self._DecodeGroupPacket6(bytes)
 
 
 class Create(Roomba):
@@ -568,6 +568,7 @@ class Create(Roomba):
   def __init__(self, tty='/dev/ttyUSB0'):
     super(Create, self).__init__(tty)
     self.sci.AddOpcodes(CREATE_OPCODES)
+    self.sensors = CreateSensors(self)
 
   def Control(self, safe=True):
     """Start the robot's SCI interface and place it in safe or full mode."""
@@ -593,7 +594,7 @@ class Create(Roomba):
   def SoftReset(self):
     """Do a soft reset of the Create."""
     self.sci.soft_reset()
-    time.sleep(3.5)
+    time.sleep(5)
     self.sci.start()  # Put the robot back in passive mode.
     self.sci.FlushInput()  # Sometimes there's turds in the receive buffer.
 

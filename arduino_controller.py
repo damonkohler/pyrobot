@@ -54,7 +54,7 @@ class ArduinoController(object):
     """Toggles the power button on the Create."""
     self.ser.write('P')  # 'P' for power.
 
-  def _CheckPower(self):
+  def CheckPower(self):
     """Check to see if the Create is turned on."""
     logging.debug('Checking power.')
     self.ser.write('S')  # 'S' for sense or status.
@@ -65,24 +65,30 @@ class ArduinoController(object):
 
   def PowerRobot(self, power):
     """Power the Create on or off."""
-    on = self._CheckPower()
+    on = self.CheckPower()
     if power and not on:
       logging.debug('Turning the robot on.')
       self._TogglePower()
     elif not power and on:
       logging.debug('Turning the robot off.')
       self._TogglePower()
+    if not (power and self.CheckPower()):
+      raise ArduinoControllerError('Failed to toggle robot power.')
 
   def Light(self, power):
     """Power the light on or off."""
     if power:
+      logging.debug('Let there be light!')
       self.ser.write('L')  # 'L' for light.
     else:
+      logging.debug('Turning the light off.')
       self.ser.write('D')  # 'D' for dark.
 
   def PowerOlpc(self, power):
     """Power the relay on or off to connect/disconnect the OLPC."""
     if power:
+      logging.debug('Connecting OLPC power.')
       self.ser.write('V')  # 'V' for victory.
     else:
+      logging.debug('Disconnecting OLPC power.')
       self.ser.write('R')  # 'R' for relay.

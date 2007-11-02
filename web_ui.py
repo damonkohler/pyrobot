@@ -42,10 +42,9 @@ class PowerManager(object):
 
   """Keeps track of the Robot's battery level and docks when necessary."""
 
-  def __init__(self, arduino, robot, sensors):
+  def __init__(self, arduino, robot):
     self.arduino = arduino
     self.robot = robot
-    self.sensors = sensors
     self.olpc_pm = olpc.PowerManager()
     self._join = False
     self._battery_monitor = None
@@ -53,23 +52,29 @@ class PowerManager(object):
   def _GetAggregateSensorData(self):
     """Return a dict of all robot and OLPC sensor data."""
     sensor_data = {}
-    self.sensors.GetAll()
-    sensor_data.update(self.sensors.data)
+    self.robot.sensors.GetAll()
+    sensor_data.update(self.robot.sensors.data)
     sensor_data.update(self.olpc_pm.GetAllSensorData())
     return sensor_data
 
   def BatteryMonitor(self):
     """Monitor the robot and OLPC battery levels to control charging."""
     while not self._join:
-      sensor_data = self._GetAggregateSensorData()
-      if sensor_data['charging-sources-available']:
-        logging.debug('Charging source available.')
-        self.arduino.PowerOlpc(True)
-        if not sensor_data['charging-state']:
-          self.robot.SoftReset()  # Robot won't charge until we reset it.
+      try:
+        sensor_data = self._GetAggregateSensorData()
+      except pyrobot.PyRobotError:
+        logging.debug('Failed to get aggregate sensor data.')
+        self.arduino.PowerRobot(True)
+        self.robot.SoftReset()
       else:
-        # No charging sources available.
-        self.arduino.PowerOlpc(False)
+        if sensor_data['charging-sources-available']:
+          logging.debug('Charging source available.')
+          if not sensor_data['charging-state']:
+            self.robot.SoftReset()  # Robot won't charge until we reset it.
+          self.arduino.PowerOlpc(True)
+        else:
+          # No charging sources available.
+          self.arduino.PowerOlpc(False)
       time.sleep(15)
 
   def StartBatteryMonitor(self):
@@ -80,9 +85,11 @@ class PowerManager(object):
 
   def Stop(self):
     """Join all threads."""
+    logging.debug('Stopping power manager.')
     self._join = True
     if self._battery_monitor is not None:
       self._battery_monitor.join()
+      self._battery_monitor = None
     self._join = False
 
   def Dock(self):
@@ -104,7 +111,6 @@ class PowerManager(object):
         self.robot.DriveStraight(pyrobot.VELOCITY_FAST)
       if sensor_data['bump-left'] or sensor_data['bump-right']:
         self.robot.Stop()
-        self.robot.SoftReset()
         break
       time.sleep(1)
 
@@ -115,9 +121,8 @@ class RobotWebController(gsd.App):
 
   def __init__(self, arduino_tty='/dev/ttyUSB0', robot_tty='/dev/ttyUSB1'):
     self.robot = pyrobot.Create(robot_tty)
-    self.sensors = pyrobot.CreateSensors(self.robot)
     self.arduino = arduino_controller.ArduinoController(arduino_tty)
-    self.power_manager = PowerManager(self.arduino, self.robot, self.sensors)
+    self.power_manager = PowerManager(self.arduino, self.robot)
     self._stop_for_obstacles = True
 
     self.web_log_stream = StringIO.StringIO()
@@ -129,34 +134,37 @@ class RobotWebController(gsd.App):
   def Start(self):
     """Start controlling the robot."""
     logging.debug('Starting up.')
+    self.power_manager.Stop()  # Just in case we're trying to restart.
+    self.power_manager.olpc_pm.SetDconSleep(True)
+    self.arduino.PowerOlpc(False)
     try:
       self.arduino.PowerRobot(True)
     except arduino_controller.ArduinoControllerError:
-      logging.debug('Failed to power on robot.')
+      logging.debug('Failed to power on robot. Aborting start procedure.')
     else:
-      time.sleep(5)  # HACK(damonkohler): It takes a few seconds to power on.
-    self.robot.SoftReset()
-    self.robot.Control(safe=False)
-    self.power_manager.Stop()  # Just in case we're trying to restart.
-    self.power_manager.StartBatteryMonitor()
-    self.power_manager.olpc_pm.SetDconSleep(True)
+      time.sleep(5)  # HACK(damonkohler): It takes a few seconds to boot.
+      self.robot.Control(safe=False)
+      self.power_manager.StartBatteryMonitor()
 
   def StopForObstacle(self, delay):
     """If we encounter an obstacle, reverse for a moment and return True."""
     start = time.time()
     while time.time() < start + delay:
-      self.sensors.GetAll()
-      sensors = self.sensors.data
-      if (sensors['bump-left'] or
-          sensors['bump-right'] or
-          sensors['virtual-wall']):
-        logging.debug('Oof!')
-        # We have to be going forward to trip these sensors, so negative
-        # velocity has to be correct.
-        self.robot.DriveStraight(-pyrobot.VELOCITY_SLOW)
-        time.sleep(1)
-        self.robot.Stop()
-        return True
+      try:
+        self.robot.sensors.GetAll()
+      except pyrobot.PyRobotError:
+        logging.debug('Failed to get sensors while watching for obstacles.')
+      else:
+        if (self.robot.sensors['bump-left'] or
+            self.robot.sensors['bump-right'] or
+            self.robot.sensors['virtual-wall']):
+          logging.debug('Oof!')
+          # We have to be going forward to trip these sensors, so negative
+          # velocity has to be correct.
+          self.robot.DriveStraight(-pyrobot.VELOCITY_SLOW)
+          time.sleep(1)
+          self.robot.Stop()
+          return True
       time.sleep(0.1)
 
   def GET_(self):
@@ -203,20 +211,20 @@ class RobotWebController(gsd.App):
     """Return a JSON object with various sensor data."""
     sensor_data = {}
     try:
-      self.sensors.GetAll(blocking=False)
+      self.robot.sensors.GetAll()
     except pyrobot.PyRobotError:
       logging.debug('Failed to retrieve sensor data.')
     else:
       try:
-        state = self.sensors.data['charging-state']
-        self.sensors.data['charging-state'] = pyrobot.CHARGING_STATES[state]
-      except KeyError:
-        logging.debug('Bad sensor data :( No charging state found.')
+        state = self.robot.sensors['charging-state']
+        state = pyrobot.CHARGING_STATES[state]
+      except (IndexError, KeyError, TypeError), e:
+        logging.debug('Bad sensor data :( %s' % e)
         self.robot.sci.FlushInput()
-      except (IndexError, TypeError):
-        logging.debug('Bad sensor data :( Invalid charging state %r' % state)
-        self.robot.sci.FlushInput()
-    sensor_data.update(self.sensors.data)
+        self.robot.sensors.Clear()
+      else:
+        sensor_data.update(self.robot.sensors.data)
+        sensor_data['charging-state'] = state
 
     olpc_pm = olpc.PowerManager()
     sensor_data.update(olpc_pm.GetAllSensorData())
