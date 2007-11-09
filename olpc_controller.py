@@ -39,17 +39,50 @@ import os
 import logging
 
 
-class PowerManager(object):
+class OlpcController(object):
 
-  """Access sysfs information about the OLPC's power."""
+  def __init__(self):
+    self.sensors = OlpcSensors()
 
   def SetDconSleep(self, sleep):
     if sleep:
-      logging.debug('Putting DCON to sleep.')
+      logging.info('Putting DCON to sleep.')
       open('/sys/devices/platform/dcon/sleep', 'w').write('1')
     else:
-      logging.debug('Waking up DCON.')
+      logging.info('Waking up DCON.')
       open('/sys/devices/platform/dcon/sleep', 'w').write('0')
+
+  def ConfigureAudio(self):
+    logging.info('Configuring audio.')
+    os.system('modprobe snd-pcm-oss')  # Make sure /dev/dsp is set up.
+    # NOTE(damonkohler): The following settings were borrowed and modified
+    # from the measure activity.
+    # Playback settings.
+    os.system("amixer set 'Master' unmute 85%")  # Used to be 25%.
+    os.system("amixer set 'Master Mono' unmute 25%")
+    os.system("amixer set 'PCM' unmute 85%")  # Used to be 50%.
+    os.system("amixer set 'Mic' mute 5%")  # Used to be 'unmute'.
+    os.system("amixer set 'Mic Boost (+20dB)' unmute")
+    #os.system("amixer set 'Analog Input' mute")  # Not found.
+    os.system("amixer set 'V_REFOUT Enable' unmute")
+    # Capture settings. Used to be 'unmute'.
+    os.system("amixer set 'Mic' 5%, 75% mute captur")
+    os.system("amixer set 'Capture' 75%, 75% mute captur")
+
+  def Speak(self, msg):
+    """Use flite to perform text to speech operations."""
+    logging.info('Speaking %r.' % msg)
+    cmd = "/home/olpc/flite -t %r" % msg
+    logging.debug('Executing %r.' % cmd)
+    os.system(cmd)
+
+
+class OlpcSensors(object):
+
+  """Access sysfs information about the OLPC's power."""
+
+  def __init__(self):
+    self.data = {}
 
   def GetCapacity(self):
     return open('/sys/class/power_supply/olpc-battery/capacity').read()
@@ -75,34 +108,19 @@ class PowerManager(object):
   def GetStatus(self):
     return open('/sys/class/power_supply/olpc-battery/status').read()
 
-  def GetAllSensorData(self):
-    """Return a dict of all sensor data."""
-    sensor_data = {}
-    sensor_data['olpc_capacity'] = self.GetCapacity()
-    sensor_data['olpc_capacity_level'] = self.GetCapacityLevel()
-    sensor_data['olpc_current_avg'] = self.GetCurrentAvg()
-    sensor_data['olpc_voltage_avg'] = self.GetVoltageAvg()
-    sensor_data['olpc_health'] = self.GetHealth()
-    sensor_data['olpc_temp'] = self.GetTemp()
-    sensor_data['olpc_temp_ambient'] = self.GetTempAmbient()
-    sensor_data['olpc_status'] = self.GetStatus()
-    return sensor_data
+  def GetAll(self):
+    """Update data dict with all sensor data."""
+    self.data['olpc_capacity'] = self.GetCapacity()
+    self.data['olpc_capacity_level'] = self.GetCapacityLevel()
+    self.data['olpc_current_avg'] = self.GetCurrentAvg()
+    self.data['olpc_voltage_avg'] = self.GetVoltageAvg()
+    self.data['olpc_health'] = self.GetHealth()
+    self.data['olpc_temp'] = self.GetTemp()
+    self.data['olpc_temp_ambient'] = self.GetTempAmbient()
+    self.data['olpc_status'] = self.GetStatus()
 
 
-class Flite(object):
-
-  """Use flite to perform text to speech operations."""
-
-  def __init__(self):
-    os.system('modprobe snd-pcm-oss')  # Make sure /dev/dsp is set up.
-
-  def Say(self, msg):
-    cmd = "/home/olpc/flite -t %r" % msg
-    logging.debug('Executing %r.' % cmd)
-    os.system(cmd)
-
-
-class Microphone(object):
+class Audio(object):
 
   """Interact with the OLPC microphone."""
 
@@ -112,19 +130,6 @@ class Microphone(object):
     self.lock = threading.Lock()
     self.pipe = self._GetMicrophonePipe(self._tmp_path)
     self.ConfigureAlsa()
-
-  def ConfigureAlsa(self):
-    # Playback settings.
-    os.system("amixer set 'Master' unmute 25%")
-    os.system("amixer set 'Master Mono' unmute 25%")
-    os.system("amixer set 'PCM' unmute 50%")
-    os.system("amixer set 'Mic' unmute 5%")
-    os.system("amixer set 'Mic Boost (+20dB)' unmute")
-    os.system("amixer set 'Analog Input' mute")
-    os.system("amixer set 'V_REFOUT Enable' unmute")
-    # Capture settings.
-    os.system("amixer set 'Mic' 5%, 75% unmute captur")
-    os.system("amixer set 'Capture' 75%, 75% unmute captur")
 
   def _GetMicrophonePipe(self, record_path):
     pipe = gst.Pipeline('olpc-microphone')
@@ -179,7 +184,7 @@ class Microphone(object):
       time.sleep(delay)
 
 
-class Camera(object):
+class Video(object):
 
   """Interact with the OLPC camera."""
 
@@ -251,14 +256,3 @@ class Camera(object):
     while True:
       self.Snap()
       time.sleep(delay)
-
-
-if __name__ == '__main__':
-  snap_path = 'snap.png'
-  c = Camera(snap_path)
-  c.Snap()
-  print 'Captured snapshot to %s' % snap_path
-  record_path = 'record.ogg'
-  m = Microphone(record_path)
-  m.Record()
-  print 'Recorded audio to %s' % record_path

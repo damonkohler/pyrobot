@@ -56,7 +56,7 @@ class ArduinoController(object):
 
   def CheckPower(self):
     """Check to see if the Create is turned on."""
-    logging.debug('Checking power.')
+    logging.info('Checking power.')
     self.ser.write('S')  # 'S' for sense or status.
     data = self.ser.read()
     if not data:
@@ -67,28 +67,29 @@ class ArduinoController(object):
     """Power the Create on or off."""
     on = self.CheckPower()
     if power and not on:
-      logging.debug('Turning the robot on.')
+      logging.info('Turning the robot on.')
       self._TogglePower()
+      time.sleep(5)  # HACK(damonkohler): It takes a few seconds to boot.
     elif not power and on:
-      logging.debug('Turning the robot off.')
+      logging.info('Turning the robot off.')
       self._TogglePower()
     if not (power and self.CheckPower()):
       raise ArduinoControllerError('Failed to toggle robot power.')
 
-  def Light(self, power):
+  def PowerLight(self, power):
     """Power the light on or off."""
     if power:
-      logging.debug('Let there be light!')
+      logging.info('Turning the light on.')
       self.ser.write('L')  # 'L' for light.
     else:
-      logging.debug('Turning the light off.')
+      logging.info('Turning the light off.')
       self.ser.write('D')  # 'D' for dark.
 
   def PowerOlpc(self, power):
     """Power the relay on or off to connect/disconnect the OLPC."""
     if power:
-      logging.debug('Connecting OLPC power.')
+      logging.info('Connecting OLPC power.')
       self.ser.write('V')  # 'V' for victory.
     else:
-      logging.debug('Disconnecting OLPC power.')
+      logging.info('Disconnecting OLPC power.')
       self.ser.write('R')  # 'R' for relay.

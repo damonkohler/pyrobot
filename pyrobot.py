@@ -46,6 +46,7 @@ import serial
 import struct
 import time
 import threading
+import traceback
 
 ROOMBA_OPCODES = dict(
     start = 128,
@@ -85,34 +86,36 @@ CREATE_OPCODES = dict(
     wait_event = 158,
     )
 
-IR_OPCODES = dict(
+REMOTE_OPCODES = {
     # Remote control.
-    left = 129,
-    forward = 130,
-    right = 131,
-    spot = 132,
-    max = 133,
-    small = 134,
-    medium = 135,
-    large = 136,
-    clean = 136,
-    pause = 137,
-    power = 138,
-    arc_left = 139,
-    arc_right = 140,
-    drive_stop = 141,
+    129: 'left',
+    130: 'forward',
+    131: 'right',
+    132: 'spot',
+    133: 'max',
+    134: 'small',
+    135: 'medium',
+    136: 'large',
+    136: 'clean',
+    137: 'pause',
+    138: 'power',
+    139: 'arc-left',
+    140: 'arc-right',
+    141: 'drive-stop',
     # Scheduling remote.
-    send_all = 142,
-    seek_dock = 143,
+    142: 'send-all',
+    143: 'seek-dock',
     # Home base.
-    reserved = 240,
-    force_field = 242,
-    green_buoy = 244,
-    red_buoy = 248,
-    red_buoy_and_force_field = 250,
-    red_buoy_and_green_buoy = 252,
-    red_buoy_and_green_buoy_and_force_field = 254,
-    )
+    240: 'reserved',
+    242: 'force-field',
+    244: 'green-buoy',
+    246: 'green-buoy-and-force-field',
+    248: 'red-buoy',
+    250: 'red-buoy-and-force-field',
+    252: 'red-buoy-and-green-buoy',
+    254: 'red-buoy-and-green-buoy-and-force-field',
+    255: 'none',
+    }
 
 BAUD_RATES = (  # In bits per second.
     300,
@@ -201,6 +204,7 @@ VELOCITY_FAST = int(VELOCITY_MAX * 0.66)
 WHEEL_SEPARATION = 298  # mm
 
 SERIAL_TIMEOUT = 2  # Number of seconds to wait for reads. 2 is generous.
+START_DELAY = 5  # Time it takes the Roomba/Create to boot.
 
 
 assert struct.calcsize('H') == 2, 'Expecting 2-byte shorts.'
@@ -237,9 +241,6 @@ class SerialCommandInterface(object):
     """Send a string of bytes to the robot."""
     with self.lock:
       self.ser.write(struct.pack('B' * len(bytes), *bytes))
-      # HACK(damonkohler): The robot seems happier (read more stable) if you
-      # give it some time to process SCI port commands.
-      time.sleep(0.1)  
 
   def Read(self, num_bytes):
     """Read a string of 'num_bytes' bytes from the robot."""
@@ -293,6 +294,18 @@ class RoombaSensors(object):
     """Indexes into sensor data."""
     return self.data[name]
 
+  def __contains__(self, name):
+    """Indexes into sensor data."""
+    return name in self.data
+
+  def _MakeHumanReadable(self, sensor, mapping):
+    """Change a sensor value to it's human readable form."""
+    try:
+      self.data[sensor] = mapping[self.data[sensor]]
+    except (KeyError, IndexError):
+      logging.debug(traceback.format_exc())
+      raise PyRobotError('Invalid sensor data.')
+
   def _DecodeGroupPacket0(self, bytes):
     """Decode sensord data from a request for group 0 (all data)."""
     # NOTE(damonkohler): We decode sensor data in reverse order for better pop
@@ -303,10 +316,12 @@ class RoombaSensors(object):
     self.DecodeShort('current', bytes.pop(), bytes.pop())  # mA
     self.DecodeUnsignedShort('voltage', bytes.pop(), bytes.pop())  # mV
     self.DecodeUnsignedByte('charging-state', bytes.pop())
+    self._MakeHumanReadable('charging-state', CHARGING_STATES)
     self.Angle(bytes.pop(), bytes.pop(), 'degrees')
     self.DecodeShort('distance', bytes.pop(), bytes.pop())  # mm
     self.Buttons(bytes.pop())
     self.DecodeUnsignedByte('remote-opcode', bytes.pop())
+    self._MakeHumanReadable('remote-opcode', REMOTE_OPCODES)
     self.DecodeUnsignedByte('dirt-detector-right', bytes.pop())
     self.DecodeUnsignedByte('dirt-detector-left', bytes.pop())
     self.MotorOvercurrents(bytes.pop())
@@ -320,16 +335,19 @@ class RoombaSensors(object):
 
   def RequestPacket(self, packet_id):
     """Reqeust a sesnor packet."""
-    self.robot.sci.sensors(packet_id)
-    length = SENSOR_GROUP_PACKET_LENGTHS[packet_id]
-    return list(self.robot.sci.Read(length))
+    with self.robot.sci.lock:
+      logging.debug('Requesting sensor packet %d.' % packet_id)
+      self.robot.sci.FlushInput()
+      self.robot.sci.sensors(packet_id)
+      length = SENSOR_GROUP_PACKET_LENGTHS[packet_id]
+      data = list(self.robot.sci.Read(length))
+      return data
 
   def GetAll(self):
     """Request and decode all available sensor data."""
-    with self.robot.sci.lock:
-      bytes = self.RequestPacket(0)
-      if bytes is not None:
-        self._DecodeGroupPacket0(bytes)
+    bytes = self.RequestPacket(0)
+    if bytes is not None:
+      self._DecodeGroupPacket0(bytes)
 
   def Angle(self, low, high, unit=None):
     """The angle that Roomba has turned through since the angle was last
@@ -437,6 +455,7 @@ class Roomba(object):
     self.sci = SerialCommandInterface(tty, 57600)
     self.sci.AddOpcodes(ROOMBA_OPCODES)
     self.sensors = RoombaSensors(self)
+    self.safe = True
 
   def ChangeBaudRate(self, baud_rate):
     """Sets the baud rate in bits per second (bps) at which SCI commands and
@@ -456,12 +475,18 @@ class Roomba(object):
     self.sci.baud(baud_rate)
     self.sci = SerialCommandInterface(self.tty, baud_rate)
 
-  def Control(self, safe=True):
-    """Start the robot's SCI interface and place it in safe mode."""
+  def Passive(self):
+    """Put the robot in passive mode."""
     self.sci.start()
+    time.sleep(0.5)
+
+  def Control(self):
+    """Start the robot's SCI interface and place it in safe mode."""
+    self.Passive()
     self.sci.control()  # Also puts the Roomba in to safe mode.
-    if not safe:
+    if not self.safe:
       self.sci.full()
+    time.sleep(0.5)
 
   def Drive(self, velocity, radius):
     """Controls Roomba's drive wheels.
@@ -521,9 +546,10 @@ class Roomba(object):
 
   def Dock(self):
     """Start looking for the dock and then dock."""
-    # NOTE(damonkohler): For some reason, it seems to require sending this
-    # twice.
-    self.sci.force_seeking_dock()
+    # NOTE(damonkohler): We should be able to call dock from any mode, however
+    # it only seems to work from passive.
+    self.sci.start()
+    time.sleep(0.5)
     self.sci.force_seeking_dock()
 
 
@@ -541,6 +567,7 @@ class CreateSensors(RoombaSensors):
     self.DecodeBool('song-playing', bytes.pop())
     self.DecodeUnsignedByte('song-number', bytes.pop())
     self.DecodeUnsignedByte('oi-mode', bytes.pop())
+    self._MakeHumanReadable('oi-mode', OI_MODES)
     self.DecodeUnsignedByte('charging-sources-available', bytes.pop())
     self.DecodeUnsignedShort('user-analog-input', bytes.pop(), bytes.pop())
     self.DecodeUnsignedByte('user-digital-inputs', bytes.pop())
@@ -555,10 +582,9 @@ class CreateSensors(RoombaSensors):
 
   def GetAll(self):
     """Request and decode all available sensor data."""
-    with self.robot.sci.lock:
-      bytes = self.RequestPacket(6)
-      if bytes is not None:
-        self._DecodeGroupPacket6(bytes)
+    bytes = self.RequestPacket(6)
+    if bytes is not None:
+      self._DecodeGroupPacket6(bytes)
 
 
 class Create(Roomba):
@@ -570,13 +596,15 @@ class Create(Roomba):
     self.sci.AddOpcodes(CREATE_OPCODES)
     self.sensors = CreateSensors(self)
 
-  def Control(self, safe=True):
+  def Control(self):
     """Start the robot's SCI interface and place it in safe or full mode."""
-    self.sci.start()
-    if safe:
+    logging.info('Sending control opcodes.')
+    self.Passive()
+    if self.safe:
       self.sci.safe()
     else:
       self.sci.full()
+    time.sleep(0.5)
 
   def PowerLowSideDrivers(self, drivers):
     """Enable or disable power to low side drivers.
@@ -593,22 +621,7 @@ class Create(Roomba):
 
   def SoftReset(self):
     """Do a soft reset of the Create."""
+    logging.info('Sending soft reset.')
     self.sci.soft_reset()
-    time.sleep(5)
-    self.sci.start()  # Put the robot back in passive mode.
-    self.sci.FlushInput()  # Sometimes there's turds in the receive buffer.
-
-
-if __name__ == '__main__':
-  """Do a little dance."""
-  r = Roomba()
-  r.sci.Wake()
-  r.Control()
-  time.sleep(0.25)
-  r.TurnInPlace(VELOCITY_FAST, 'cw')
-  time.sleep(0.25)
-  r.TurnInPlace(VELOCITY_FAST, 'ccw')
-  time.sleep(0.25)
-  r.DriveStraight(VELOCITY_FAST)
-  time.sleep(0.25)
-  r.Stop()
+    time.sleep(START_DELAY)
+    self.Passive()

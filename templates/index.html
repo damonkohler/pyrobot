@@ -78,7 +78,7 @@
           MochiKit.Async.callLater(5, updateLoggingPane);
         });
       }
-      
+
       MochiKit.Signal.connect(window, 'onload', updateSensorData);
       MochiKit.Signal.connect(window, 'onload', updateLoggingPane);
     </script>
@@ -90,40 +90,19 @@
           <img id="webcam" src="http://damonkohler.dnsalias.net:8081">
         </td>
         <td valign="top" width="100em">
-          Power <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/robot_on');
-               return false;">On</a> /
-          <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/robot_off');
-               return false;">Off</a><br>
           Light <a href="#"
              onclick="javascript:MochiKit.Async.loadJSONDoc('/light_on');
                return false;">On</a> /
           <a href="#"
              onclick="javascript:MochiKit.Async.loadJSONDoc('/light_off');
                return false;">Off</a><br>
-          Relay <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/relay_on');
-               return false;">On</a> /
           <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/relay_off');
-               return false;">Off</a><br>
+             onclick="javascript:MochiKit.Async.loadJSONDoc('/speak?msgs=' +
+               prompt('What would you like to say?', 'I come in peace.'));
+               return false;">Talk</a><br>
           <a href="#"
              onclick="javascript:MochiKit.Async.loadJSONDoc('/restart');
-               return false;">Restart</a><br>
-          <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/soft_reset');
-               return false;">Soft Reset</a><br>
-          <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/safe');
-               return false;">Safe</a><br>
-          <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/full');
-               return false;">Full</a><br>
-          <a href="#"
-             onclick="javascript:MochiKit.Async.loadJSONDoc('/say?msgs=' +
-               prompt('What would you like to say?', 'Hello world!'));
-               return false;">Talk</a><br>
+               return false;">Don't Panic</a><br>
         </td>
         <td valign="top" rowspan="3">
           <div id="logging_pane" class="logging_pane"></div>
@@ -145,8 +124,11 @@
                return false;">Right</a> |
           <a href="#"
              onclick="javascript:MochiKit.Async.loadJSONDoc('/dock');
-               return false;">Dock</a>
-         </td>
+               return false;">Dock</a> |
+          <a href="#"
+             onclick="javascript:MochiKit.Async.loadJSONDoc('/undock');
+               return false;">Undock</a>
+          </td>
       </tr>
       <tr><td></td></tr>
     </table>
