@@ -85,25 +85,25 @@ class OlpcSensors(object):
     self.data = {}
 
   def GetCapacity(self):
-    return open('/sys/class/power_supply/olpc-battery/capacity').read()
+    return int(open('/sys/class/power_supply/olpc-battery/capacity').read())
 
   def GetCapacityLevel(self):
     return open('/sys/class/power_supply/olpc-battery/capacity_level').read()
 
   def GetCurrentAvg(self):
-    return open('/sys/class/power_supply/olpc-battery/current_avg').read()
+    return int(open('/sys/class/power_supply/olpc-battery/current_avg').read())
 
   def GetVoltageAvg(self):
-    return open('/sys/class/power_supply/olpc-battery/voltage_avg').read()
+    return int(open('/sys/class/power_supply/olpc-battery/voltage_avg').read())
 
   def GetHealth(self):
     return open('/sys/class/power_supply/olpc-battery/health').read()
 
   def GetTemp(self):
-    return open('/sys/class/power_supply/olpc-battery/temp').read()
+    return int(open('/sys/class/power_supply/olpc-battery/temp').read())
 
   def GetTempAmbient(self):
-    return open('/sys/class/power_supply/olpc-battery/temp_ambient').read()
+    return int(open('/sys/class/power_supply/olpc-battery/temp_ambient').read())
 
   def GetStatus(self):
     return open('/sys/class/power_supply/olpc-battery/status').read()

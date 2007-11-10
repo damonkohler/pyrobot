@@ -6,49 +6,95 @@
     <style type="text/css">
       body { font-size: small; }
       table.sensors {
-        border: 0px;
+        border: none;
         border-collapse: collapse;
-        padding: 0px;
-        margin: 0px;
-        font-size: 0.7em;
-        width: 30em;
+        font-size: smaller;
       }
       table.sensors tr:hover { background-color: #ddd; }
       table.sensors th { text-align: left; }
+      table.sensors td { padding: 0px 2em 0px 0px; }
       div.logging_pane {
         border: solid 1px black;
-        width: 400px;
+        width: 500px;
         height: 240px;
         overflow: auto;
+        padding: 0.25em;
       }
       p.logging {
-        font-size: 0.7em;
-        padding: 0px;
+        font-size: smaller;
         margin: 0px;
       }
     </style>
     <script type="text/javascript" src="/static/MochiKit/MochiKit.js"></script>
+    <script type="text/javascript" src="/static/MochiKit/Color.js"></script>
     <script type="text/javascript">
+      var SENSOR_DELAY = 2;
+      var SENSOR_HISTORY = 25;
+      var sensors = {};
+
+      function Sparkline(data) {
+        var w = 100;
+        var h = 8;
+        var attrs = {
+          'style': 'display: inline; height: ' + h + 'px; width: ' + w + 'px;',
+          'height': h + 'px',
+          'width': w + 'px',
+        }
+        var canvas = createDOM('canvas', attrs);
+        var min = Math.min.apply(Math, data);
+        var max = Math.max.apply(Math, data);
+        if (max == min) {
+          max++;  // Prevents a divide-by-zero error.
+        }
+
+        var c = canvas.getContext('2d');
+        c.strokeStyle = 'gray';
+        c.lineWidth = 1;
+        c.beginPath();
+
+        for (var i = 0; i < data.length; i++) {
+          var x = (w / SENSOR_HISTORY) * i;
+          var y = h - (((data[i] - min) / (max - min)) * h);
+          c.lineTo(x, y);
+        }
+        c.stroke();
+        return canvas;
+      }
+
       buildSensorTable = function(obj) {
         var rows = [];
         for (attr in obj) {
-          rows.push([attr, obj[attr]]);
+          var graph = DIV();
+          if (typeof(sensors[attr]) != 'undefined' &&
+              sensors[attr].length > 1 &&
+              typeof(sensors[attr][0]) == 'number') {
+            graph = Sparkline(sensors[attr]);
+          }
+          rows.push([attr, obj[attr], graph]);
         }
         rows.sort(function(a, b) { return ((a[0] < b[0]) ? -1 : 1); });
         row_display = function (row) {
           return TR({'id': row[0]}, map(partial(TD, null), row));
         }
         var newTable = TABLE({'id': 'sensors', 'class': 'sensors'},
-          TH({'width': '100'}, 'Sensor'),
-          TH(null, 'Value'),
+          TH({'width': '100'}, 'Sensors'), TH(), TH(),
           TBODY(null, map(row_display, rows)));
-        return newTable
+        return newTable;
       }
 
-      updateSensorData = function(last_sensor_data) {
+      updateSensorData = function() {
         log('Update sensors.')
         var d = MochiKit.Async.loadJSONDoc('/sensors');
         d.addCallback(function(r) {
+          for (attr in r) {
+            if (typeof(sensors[attr]) == 'undefined') {
+              sensors[attr] = [];
+            }
+            sensors[attr].push(r[attr]);
+            if (sensors[attr].length > SENSOR_HISTORY) {
+              sensors[attr].shift();
+            }
+          }
           new_sensor_table = buildSensorTable(r);
           sensor_table = getElement('sensors');
           if (!sensor_table) {
@@ -58,14 +104,15 @@
             MochiKit.DOM.swapDOM(sensor_table, new_sensor_table);
           }
           for (attr in r) {
-            if (r[attr] != last_sensor_data[attr]) {
+            if (r[attr] != sensors[attr][sensors[attr].length - 2]) {
               MochiKit.Visual.Highlight(attr);
             }
           }
-          MochiKit.Async.callLater(5, updateSensorData, r);
+          MochiKit.Async.callLater(SENSOR_DELAY, updateSensorData);
         });
         d.addErrback(function(e) {
-          MochiKit.Async.callLater(5, updateSensorData, {'error': e});
+          logError(e);
+          MochiKit.Async.callLater(SENSOR_DELAY, updateSensorData);
         });
       }
 
