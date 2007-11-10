@@ -33,23 +33,7 @@ import time
 import pyrobot
 import arduino_controller
 import olpc_controller
-import traceback
 import random
-
-DEBUG = True
-
-if DEBUG:
-  def Debug(type, value, tb):
-     if hasattr(sys, 'ps1') or not sys.stderr.isatty():
-        # We are in interactive mode or we don't have a tty-like device, so we
-        # call the default hook.
-        sys.__excepthook__(type, value, tb)
-     else:
-        import pdb
-        # Start the debugger in post-mortem mode.
-        pdb.pm()
-  sys.excepthook = Debug
-
 
 SENSOR_DELAY = 0.05
 MOVE_DELAY = 1
@@ -157,6 +141,7 @@ class Fido(object):
     logging.info('Disengaging from dock.')
     self.power_manager.Stop()
     self.StartRobot()
+    self.Left()  # This helps it get out of the dock.
     self.Reverse()
     self.power_manager.Start()
 
@@ -172,7 +157,10 @@ class Fido(object):
       self.robot.Control()
       self.Reverse()
       self.robot.DriveStraight(pyrobot.VELOCITY_MAX)
-      while not (self.sensors['bump-left'] or self.sensors['bump-right']):
+      start = time.time()
+      while (time.time() - start < 10
+             and (not self.sensors['bump-left'])
+             and (not self.sensors['bump-right'])):
         time.sleep(SENSOR_DELAY)
       self.robot.Stop()
       time.sleep(1)  # Give the sensors some time to update.
@@ -183,7 +171,7 @@ class Fido(object):
     def Retry():
       logging.info('Docking failed. Retrying.')
       self.robot.Control()
-      self.Reverse()
+      [self.Reverse() for i in range(3)]
       direction = 'cw'
       if random.random() > 0.5:
         direction = 'ccw'

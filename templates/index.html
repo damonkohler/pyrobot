@@ -17,9 +17,14 @@
       table.sensors th { text-align: left; }
       div.logging_pane {
         border: solid 1px black;
-        width: 100%;
+        width: 400px;
         height: 240px;
         overflow: auto;
+      }
+      p.logging {
+        font-size: 0.7em;
+        padding: 0px;
+        margin: 0px;
       }
     </style>
     <script type="text/javascript" src="/static/MochiKit/MochiKit.js"></script>
@@ -41,6 +46,7 @@
       }
 
       updateSensorData = function(last_sensor_data) {
+        log('Update sensors.')
         var d = MochiKit.Async.loadJSONDoc('/sensors');
         d.addCallback(function(r) {
           new_sensor_table = buildSensorTable(r);
@@ -63,24 +69,30 @@
         });
       }
 
-      updateLoggingPane = function() {
-        var d = MochiKit.Async.loadJSONDoc('/log');
+      comet = function() {
+        var d = MochiKit.Async.loadJSONDoc('/comet');
         d.addCallback(function(r) {
-          log('Updating logging pane.')
-          new_logging_pane = DIV({'class': 'logging_pane',
-              'id': 'logging_pane'}, PRE(null, r.log));
-          logging_pane = getElement('logging_pane');
-          MochiKit.DOM.swapDOM(logging_pane, new_logging_pane);
-          new_logging_pane.scrollTop = new_logging_pane.scrollHeight;
-          MochiKit.Async.callLater(5, updateLoggingPane);
+          pushData(r.key, r.value);
+          comet();
         });
         d.addErrback(function(e) {
-          MochiKit.Async.callLater(5, updateLoggingPane);
+          log('Comet error.');
+          comet();
         });
       }
 
+      pushData = function(key, value) {
+        if (key == 'logging') {
+          log('Updating logging pane.');
+          logging_pane = getElement('logging_pane');
+          MochiKit.DOM.appendChildNodes(logging_pane,
+              P({'class': 'logging'}, value))
+          logging_pane.scrollTop = logging_pane.scrollHeight;
+        }
+      }
+
       MochiKit.Signal.connect(window, 'onload', updateSensorData);
-      MochiKit.Signal.connect(window, 'onload', updateLoggingPane);
+      MochiKit.Signal.connect(window, 'onload', comet);
     </script>
   </head>
   <body>
@@ -105,7 +117,9 @@
                return false;">Don't Panic</a><br>
         </td>
         <td valign="top" rowspan="3">
-          <div id="logging_pane" class="logging_pane"></div>
+          <div id="logging_pane" class="logging_pane">
+            <p class="logging">Welcome to Fido! W00f!</p>
+          </div>
         </td>
       </tr>
       <tr>
