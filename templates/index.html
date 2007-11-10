@@ -15,7 +15,7 @@
       table.sensors td { padding: 0px 2em 0px 0px; }
       div.logging_pane {
         border: solid 1px black;
-        width: 500px;
+        width: 400px;
         height: 240px;
         overflow: auto;
         padding: 0.25em;
@@ -97,12 +97,7 @@
           }
           new_sensor_table = buildSensorTable(r);
           sensor_table = getElement('sensors');
-          if (!sensor_table) {
-            doc = currentDocument();
-            MochiKit.DOM.appendChildNodes(doc.body, new_sensor_table);
-          } else {
-            MochiKit.DOM.swapDOM(sensor_table, new_sensor_table);
-          }
+          MochiKit.DOM.swapDOM(sensor_table, new_sensor_table);
           for (attr in r) {
             if (r[attr] != sensors[attr][sensors[attr].length - 2]) {
               MochiKit.Visual.Highlight(attr);
@@ -143,12 +138,12 @@
     </script>
   </head>
   <body>
-    <table width="100%">
+    <table>
       <tr>
-        <td width="320">
+        <td width="320" height="240">
           <img id="webcam" src="http://damonkohler.dnsalias.net:8081">
         </td>
-        <td valign="top" width="100em">
+        <td valign="top">
           Light <a href="#"
              onclick="javascript:MochiKit.Async.loadJSONDoc('/light_on');
                return false;">On</a> /
@@ -163,10 +158,9 @@
              onclick="javascript:MochiKit.Async.loadJSONDoc('/restart');
                return false;">Don't Panic</a><br>
         </td>
-        <td valign="top" rowspan="3">
-          <div id="logging_pane" class="logging_pane">
-            <p class="logging">Welcome to Fido! W00f!</p>
-          </div>
+        <td width="5em"></td>
+        <td valign="top" rowspan="4">
+          <div id="sensors"></div>
         </td>
       </tr>
       <tr>
@@ -190,9 +184,16 @@
              onclick="javascript:MochiKit.Async.loadJSONDoc('/undock');
                return false;">Undock</a>
           </td>
+          <td></td>
+      </tr>
+      <tr>
+        <td valign="top" colspan="3">
+          <div id="logging_pane" class="logging_pane">
+            <p class="logging">Welcome to Fido! W00f!</p>
+          </div>
+        </td>
       </tr>
       <tr><td></td></tr>
     </table>
-    <br><br>
   </body>
 </html>
