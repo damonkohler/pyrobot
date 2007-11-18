@@ -79,6 +79,7 @@ class Fido(object):
     logging.info('Starting up the OLPC.')
     self.olpc.SetDconSleep(True)
     self.olpc.ConfigureAudio()
+    #self.olpc.StreamAudio('10.171.236.100', 8000)
 
   def Start(self):
     """Start controlling the robot."""

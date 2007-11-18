@@ -26,7 +26,6 @@
       }
     </style>
     <script type="text/javascript" src="/static/MochiKit/MochiKit.js"></script>
-    <script type="text/javascript" src="/static/MochiKit/Color.js"></script>
     <script type="text/javascript">
       var SENSOR_DELAY = 2;
       var SENSOR_HISTORY = 25;
@@ -136,12 +135,83 @@
       MochiKit.Signal.connect(window, 'onload', updateSensorData);
       MochiKit.Signal.connect(window, 'onload', comet);
     </script>
+    <script type="text/javascript">
+      var pan_max = 70;
+      var tilt_max = 30;
+      var img_width = 320;
+      var img_height = 240;
+
+      // NOTE(damonkohler): These values were found by trial-and-error.
+      var pixel_pan = pan_max / 400;
+      var pixel_tilt = tilt_max / 150;
+
+      var pan = 0;
+      var tilt = 0;
+
+      panAndTilt = function(x, y) {
+        if (typeof(x) != 'undefined') {
+          pan = x;
+        }
+        if (typeof(y) != 'undefined') {
+          tilt = y;
+        }
+        if (pan > 0 && pan > pan_max) {
+          pan = pan_max;
+        } else if (pan < 0 && pan < -pan_max) {
+          pan = -pan_max;
+        }
+        if (tilt > 0 && tilt > tilt_max) {
+          tilt = tilt_max;
+        } else if (tilt < 0 && tilt < -tilt_max) {
+          tilt = -tilt_max;
+        }
+        pan = Math.round(pan);
+        tilt = Math.round(tilt);
+        MochiKit.Async.loadJSONDoc('/track?x=' + pan + '&y=' + tilt);
+      }
+
+      panAndTilt();
+
+      clicked = function(e) {
+        var x = e.mouse().client.x - elementPosition('webcam').x;
+        var y = e.mouse().client.y - elementPosition('webcam').y;
+        log(x, y);
+        x = x - (img_width / 2);
+        y = (img_height / 2) - y;
+        log(x, y);
+        pan += x * pixel_pan;
+        tilt += y * pixel_tilt;
+        panAndTilt();
+      }
+
+      rearView = function() {
+        MochiKit.Async.loadJSONDoc('/rearview');
+        var webcam = getElement('webcam');
+        MochiKit.Async.callLater(8, function() {
+          webcam.src = ('http://damonkohler.dnsalias.net:8081/?' +
+              (new Date()).getTime());
+        });
+      }
+
+      frontView = function() {
+        MochiKit.Async.loadJSONDoc('/frontview');
+        var webcam = getElement('webcam');
+        MochiKit.Async.callLater(8, function() {
+          webcam.src = ('http://damonkohler.dnsalias.net:8081/?' +
+              (new Date()).getTime());
+        });
+      }
+    </script>
   </head>
   <body>
     <table>
       <tr>
         <td width="320" height="240">
-          <img id="webcam" src="http://damonkohler.dnsalias.net:8081">
+          <img id="webcam" src="http://damonkohler.dnsalias.net:8081"
+              width="320" height="240">
+          <script>
+            MochiKit.Signal.connect('webcam', 'onclick', clicked);
+          </script>
         </td>
         <td valign="top">
           Light <a href="#"
@@ -157,8 +227,24 @@
           <a href="#"
              onclick="javascript:MochiKit.Async.loadJSONDoc('/restart');
                return false;">Don't Panic</a><br>
-        </td>
-        <td width="5em"></td>
+          <br>Camera<br>
+          <a href="#"
+             onclick="javascript:panAndTilt(0, 0); return false;">Center</a><br>
+          <a href="#"
+             onclick="javascript:panAndTilt(-70, 0); return false;">Left</a><br>
+           <a href="#"
+             onclick="javascript:panAndTilt(70, 0); return false;">Right</a><br>
+           <a href="#"
+             onclick="javascript:panAndTilt(0, 40); return false;">Up</a><br>
+           <a href="#"
+             onclick="javascript:panAndTilt(0, -40); return false;">Down</a><br>
+           <br>
+          View <a href="#"
+             onclick="javascript:frontView(); return false;">Front</a> /
+           <a href="#"
+             onclick="javascript:rearView(); return false;">Rear</a><br>
+            </td>
+        <td width="25"></td>
         <td valign="top" rowspan="4">
           <div id="sensors"></div>
         </td>

@@ -36,6 +36,9 @@ import gsd
 import fido
 import Queue
 import threading
+import urllib2
+import motion
+import time
 
 FORMAT = '%(asctime)s %(levelname)s [%(filename)s:%(lineno)d] %(message)s'
 DATE_FORMAT = '%H%M%S'
@@ -71,6 +74,7 @@ class FidoWeb(gsd.App):
 
   def __init__(self, arduino_tty='/dev/ttyUSB0', robot_tty='/dev/ttyUSB1'):
     self._fido = fido.Fido(arduino_tty, robot_tty)
+    self._motion = motion.MotionController('localhost', 8082)
     self._lock = threading.Lock()
     self._comet_queues = {}
     # Set up logging.
@@ -152,6 +156,26 @@ class FidoWeb(gsd.App):
     """Use flite to do text to speech."""
     self._fido.olpc.Speak(msgs[0])
 
+  def GET_track(self, handler, x, y):
+    """Track camera to absolute position x, y."""
+    self._motion.Track(x, y)
+
+  def GET_rearview(self, handler):
+    """Switch to rearview camera."""
+    self._motion.Set('videodevice', '/dev/video0')
+    time.sleep(1)
+    self._motion.Write()
+    time.sleep(1)
+    self._motion.Restart()
+
+  def GET_frontview(self, handler):
+    """Switch to frontview camera."""
+    self._motion.Set('videodevice', '/dev/video1')
+    time.sleep(1)
+    self._motion.Write()
+    time.sleep(1)
+    self._motion.Restart()
+
 
 def main():
   arduino_tty = '/dev/ttyUSB0'
@@ -164,6 +188,7 @@ def main():
 
   fido_web = FidoWeb(arduino_tty, robot_tty)
   fido_web._fido.Start()
+  fido_web._motion.Start()
   fido_web.Main()
 
 

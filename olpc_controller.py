@@ -54,7 +54,8 @@ class OlpcController(object):
 
   def ConfigureAudio(self):
     logging.info('Configuring audio.')
-    os.system('modprobe snd-pcm-oss')  # Make sure /dev/dsp is set up.
+    # HACK(damonkohler): Install oss pcm sound module for flite.
+    os.system('modprobe snd-pcm-oss')
     # NOTE(damonkohler): The following settings were borrowed and modified
     # from the measure activity.
     # Playback settings.
@@ -68,6 +69,10 @@ class OlpcController(object):
     # Capture settings. Used to be 'unmute'.
     os.system("amixer set 'Mic' 5%, 75% mute captur")
     os.system("amixer set 'Capture' 75%, 75% mute captur")
+
+  def StreamAudio(self, host, port):
+    self.audio_stream = AudioStream(host, port)
+    self.audio_stream.Start()
 
   def Speak(self, msg):
     """Use flite to perform text to speech operations."""
@@ -99,6 +104,7 @@ class OlpcSensors(object):
   def GetHealth(self):
     return open('/sys/class/power_supply/olpc-battery/health').read()
 
+
   def GetTemp(self):
     return int(open('/sys/class/power_supply/olpc-battery/temp').read())
 
@@ -120,68 +126,41 @@ class OlpcSensors(object):
     self.data['olpc_status'] = self.GetStatus()
 
 
-class Audio(object):
+class AudioStream(object):
 
-  """Interact with the OLPC microphone."""
+  """Stream audio from the OLPC microphone to an Icecast server."""
 
-  def __init__(self, record_path):
-    self._record_path = record_path
-    unused, self._tmp_path = tempfile.mkstemp(dir='static')
-    self.lock = threading.Lock()
-    self.pipe = self._GetMicrophonePipe(self._tmp_path)
-    self.ConfigureAlsa()
+  def __init__(self, host, port, password):
+    self.pipe = self._GetAudioPipe(host, port, password)
 
-  def _GetMicrophonePipe(self, record_path):
-    pipe = gst.Pipeline('olpc-microphone')
+  def _GetAudioPipe(self, host, port, password):
+    pipe = gst.Pipeline('olpc-audio')
+    caps = gst.Caps('audio/x-raw-int,rate=8000,channels=1,depth=8')
     elems = []
 
-    def Add(name):
+    def Add(name, properties=None):
       elem = gst.element_factory_make(name, name)
+      properties = properties or {}
+      for property, value in properties.iteritems():
+        elem.set_property(property, value)
       pipe.add(elem)
       elems.append(elem)
 
     Add('alsasrc')
-    Add('capsfilter')
-    Add('queue')
+    Add('capsfilter', {'caps': caps})
     Add('audioconvert')
     Add('vorbisenc')
-    Add('oggmux')
-    Add('filesink')
+    Add('shout2send', {'ip': host, 'port': port, 'password': password,
+                       'mount': '/olpc.ogg'})
 
     gst.element_link_many(*elems)
-    pipe.get_by_name('filesink').set_property('location', record_path)
-    caps = gst.Caps('audio/x-raw-int,rate=8000,channels=1,depth=8')
-    pipe.get_by_name('capsfilter').set_property('caps', caps)
-
     return pipe
 
-  def Record(self, duration=10):
-    """Record audio for duration seconds."""
-    self.lock.acquire()
+  def Start(self):
     self.pipe.set_state(gst.STATE_PLAYING)
-    time.sleep(duration)
-    # TODO(damonkohler): This doesn't necessarily always result in a 10 second
-    # clip. Need to monitor gst messages to see if it has started.
+
+  def Stop(self):
     self.pipe.set_state(gst.STATE_NULL)
-    try:
-      shutil.move(self._tmp_path, self._record_path)
-    except IOError:
-      # NOTE(damonkohler): Ignoring errors for now.
-      print 'Failed to move audio recording.'
-      traceback.print_exc()
-    self.lock.release()
-
-  def StartMicrophone(self, delay=1):
-    """Starts a thread to take snapshots every 'delay' seconds."""
-    recorder = threading.Thread(target=self._Microphone, args=(delay,))
-    recorder.setDaemon(True)
-    recorder.start()
-
-  def _Microphone(self, delay):
-    """Takes a snapshot at a minimum of every 'delay' seconds."""
-    while True:
-      self.Record()
-      time.sleep(delay)
 
 
 class Video(object):
