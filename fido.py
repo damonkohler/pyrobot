@@ -142,8 +142,9 @@ class Fido(object):
     logging.info('Disengaging from dock.')
     self.power_manager.Stop()
     self.StartRobot()
-    self.Left()  # This helps it get out of the dock.
-    self.Reverse()
+    self.robot.DriveStraight(-pyrobot.VELOCITY_MAX)
+    time.sleep(MOVE_DELAY)
+    self.robot.Stop()
     self.power_manager.Start()
 
   def Dock(self):

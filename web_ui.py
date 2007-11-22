@@ -163,17 +163,13 @@ class FidoWeb(gsd.App):
   def GET_rearview(self, handler):
     """Switch to rearview camera."""
     self._motion.Set('videodevice', '/dev/video0')
-    time.sleep(1)
     self._motion.Write()
-    time.sleep(1)
     self._motion.Restart()
 
   def GET_frontview(self, handler):
     """Switch to frontview camera."""
     self._motion.Set('videodevice', '/dev/video1')
-    time.sleep(1)
     self._motion.Write()
-    time.sleep(1)
     self._motion.Restart()
 
 
