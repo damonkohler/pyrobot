@@ -46,8 +46,6 @@ class MotionController(object):
     self.port = port
     self.thread = thread
     self._process = None
-    # HACK(damonkohler): Install uvcvideo module.
-    os.system('modprobe uvcvideo')
 
   @property
   def control_url(self):
@@ -95,8 +93,8 @@ class MotionController(object):
 
   def Restart(self):
     """Restart motion."""
-    # HACK(damonkohler): This doesn't seem to work. So instead, we kill the
-    # process and restart it.
-    #urllib2.urlopen(self.control_url + 'action/restart').read()
-    self.Kill()
-    self.Start()
+    urllib2.urlopen(self.control_url + 'action/restart').read()
+
+  def Quit(self):
+    """Exit motion."""
+    urllib2.urlopen(self.control_url + 'action/quit').read()
